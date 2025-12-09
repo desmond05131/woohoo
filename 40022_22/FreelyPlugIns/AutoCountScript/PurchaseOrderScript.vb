@@ -1,0 +1,18 @@
+﻿Public Class PurchaseOrderScript
+    Private ReadOnly _helper As New PriceHistoryHelper()
+
+    Public Sub OnFormShow(e As AutoCount.Invoicing.Purchase.PurchaseOrder.FormPurchaseOrderEntry.FormShowEventArgs)
+        _helper.AddStockItemMaintenanceRibbon(e.Form, e.UserSession, e.DBSetting, e.EditWindowMode)
+        _helper.AddCustomTabs(e.Form, e.UserSession, e.DBSetting)
+    End Sub
+    Public Sub OnSwitchToEditMode(e As AutoCount.Invoicing.Purchase.PurchaseOrder.FormPurchaseOrderEntry.FormEventArgs)
+        ' Find the ribbon group again
+        Dim ribbonCtrl = e.Form.Ribbon
+        Dim newGroup = ribbonCtrl.Pages("Home").Groups _
+            .FirstOrDefault(Function(g) g.Name = "ribbonPageGroupStockItemMaintenance")
+
+        If newGroup IsNot Nothing Then
+            newGroup.Visible = (e.EditWindowMode <> AutoCount.Document.EditWindowMode.View)
+        End If
+    End Sub
+End Class

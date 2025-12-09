@@ -1,0 +1,2787 @@
+﻿Imports System.Data.SqlClient
+Imports System.Text
+Imports AutoCount.Application
+Imports DevExpress.XtraEditors
+Imports DevExpress.XtraGrid.Views.Grid
+Imports DevExpress.XtraBars
+Imports DevExpress.XtraBars.Ribbon
+Imports DevExpress.XtraGrid
+Imports AutoCount.Authentication
+Imports AutoCount.Data
+Imports FreelyCreative.StockItemInquiry.AutocountScript.PriceHistory.Model.PriceHistory
+Imports System.Threading.Tasks
+Imports DevExpress.XtraTab
+Imports FreelyCreative.StockItemInquiry.Freely
+Imports AutoCount.Data.EntityFramework
+
+Public Class PriceHistoryHelper
+    Private _isSalesOverlayLoading As Boolean = False
+    Private _isPurchaseOverlayLoading As Boolean = False
+
+#Region "Find method"
+    '<--- this method only find gridcontrol from the form --->
+    Private Function FindGridControl(parent As Control, name As String) As GridControl
+        If parent Is Nothing Then Return Nothing
+        For Each ctrl As Control In parent.Controls
+            If TypeOf ctrl Is GridControl AndAlso ctrl.Name = name Then
+                Return CType(ctrl, GridControl)
+            Else
+                Dim found = FindGridControl(ctrl, name)
+                If found IsNot Nothing Then Return found
+            End If
+        Next
+        Return Nothing
+    End Function
+
+    '<--- this method only find tabcontrol while using the getallcontrol method --->
+    Private Function GetTabControl(form As XtraForm) As DevExpress.XtraTab.XtraTabControl
+        Return GetAllControls(form) _
+        .OfType(Of DevExpress.XtraTab.XtraTabControl)() _
+        .FirstOrDefault(Function(tc) tc.Name = "tabctrInquiry")
+    End Function
+
+    '<--- this method is generic can find all properties as long as provide the type and name --->
+    Private Iterator Function GetAllControls(parent As Control) As IEnumerable(Of Control)
+        For Each control As Control In parent.Controls
+            Yield control
+
+            For Each child As Control In GetAllControls(control)
+                Yield child
+            Next
+        Next
+    End Function
+#End Region
+
+#Region "<--- add stock item maintenance button --->"
+    Public Sub AddStockItemMaintenanceRibbon(form As XtraForm,
+                                             session As AutoCount.Authentication.UserSession,
+                                             dbSetting As AutoCount.Data.DBSetting,
+                                             docMode As AutoCount.Document.EditWindowMode)
+        Dim ribbonForm = TryCast(form, DevExpress.XtraBars.Ribbon.RibbonForm)
+        If ribbonForm Is Nothing OrElse ribbonForm.Ribbon Is Nothing Then Return
+
+        Dim ribbonCtrl = ribbonForm.Ribbon
+
+        ' Check for existing group
+        Dim newGroup = ribbonCtrl.Pages("Home").Groups _
+                    .FirstOrDefault(Function(g) g.Name = "ribbonPageGroupStockItemMaintenance")
+
+        ' Create the group if it does not exist
+        If newGroup Is Nothing Then
+            newGroup = New DevExpress.XtraBars.Ribbon.RibbonPageGroup("Stock Item") With {
+            .Name = "ribbonPageGroupStockItemMaintenance"
+        }
+            ribbonCtrl.Pages("Home").Groups.Add(newGroup)
+        End If
+
+        ' Check for existing button
+        Dim btnStockItemMaintenance = ribbonCtrl.Items _
+                                  .OfType(Of DevExpress.XtraBars.BarButtonItem)() _
+                                  .FirstOrDefault(Function(b) b.Name = "btnStockItemMaintenance")
+
+        ' Create button if it does not exist
+        If btnStockItemMaintenance Is Nothing Then
+            btnStockItemMaintenance = New DevExpress.XtraBars.BarButtonItem With {
+                .Name = "btnStockItemMaintenance",
+                .Caption = "Stock Item Maintenance",
+                .RibbonStyle = DevExpress.XtraBars.Ribbon.RibbonItemStyles.Large
+            }
+            newGroup.ItemLinks.Add(btnStockItemMaintenance)
+
+            AddHandler btnStockItemMaintenance.ItemClick,
+                Sub(s, args)
+                    Dim grid = FindGridControl(form, "gridControlDetail")
+
+                    If grid Is Nothing Then
+                        XtraMessageBox.Show("Detail grid not found.", "Autosoft", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                        Return
+                    End If
+
+                    OpenStockItemMaintenance(grid, session, dbSetting)
+                End Sub
+        End If
+
+        newGroup.Visible = (docMode <> AutoCount.Document.EditWindowMode.View)
+        btnStockItemMaintenance.ImageOptions.SvgImage = My.Resources.stockitemmaintenance
+    End Sub
+    Private Sub OpenStockItemMaintenance(grid As GridControl,
+                                         userSession As AutoCount.Authentication.UserSession,
+                                         dbSetting As AutoCount.Data.DBSetting)
+        Dim view = TryCast(grid.MainView, GridView)
+        If view Is Nothing OrElse view.FocusedRowHandle < 0 Then Return
+
+        Dim itemCode As String = Convert.ToString(view.GetRowCellValue(view.FocusedRowHandle, "ItemCode"))
+        If String.IsNullOrEmpty(itemCode) Then Return
+
+        Try
+            Dim itemEntity = AutoCount.Stock.Item.ItemDataAccess _
+                        .Create(userSession, dbSetting) _
+                        .LoadItem(itemCode, AutoCount.Stock.Item.ItemEntryAction.View)
+
+            If itemEntity Is Nothing Then
+                XtraMessageBox.Show("Item Not Found", "Autosoft", MessageBoxButtons.OK, MessageBoxIcon.[Error])
+                Return
+            End If
+
+            Dim threadform As New ThreadForm(GetType(AutoCount.Stock.Item.FormStockItem).AssemblyQualifiedName,
+                                         New Type() {itemEntity.GetType(), dbSetting.GetType()},
+                                         New Object() {itemEntity, dbSetting})
+            threadform.Show()
+        Catch ex As Exception
+            XtraMessageBox.Show(ex.Message, "Autosoft", MessageBoxButtons.OK, MessageBoxIcon.[Error])
+        End Try
+    End Sub
+#End Region
+
+#Region "<--- V2 add sales/purchase price history tab --->"
+    Public Sub AddCustomTabs(form As XtraForm, userSession As UserSession, dbSetting As DBSetting)
+        AttachEntryGridEvents(form, userSession, dbSetting)
+        AttachRibbonClick(form, userSession, dbSetting)
+    End Sub
+
+    Private Sub AttachEntryGridEvents(form As XtraForm, userSession As UserSession, dbSetting As DBSetting)
+        Dim entryGrid = GetAllControls(form) _
+        .OfType(Of DevExpress.XtraGrid.GridControl)() _
+        .FirstOrDefault(Function(g) g.Name = "gridControlDetail")
+
+        Dim entryView = TryCast(entryGrid?.MainView, DevExpress.XtraGrid.Views.Grid.GridView)
+        If entryView Is Nothing Then Return
+
+        ' When focused row changes
+        AddHandler entryView.FocusedRowChanged,
+        Async Sub(s, args)
+            'Dim itemCode = TryCast(entryView.GetRowCellValue(args.FocusedRowHandle, "Itemcode"), String)
+            'If String.IsNullOrEmpty(itemCode) Then
+            ' Fire and forget: user can continue interacting immediately
+            Await Task.Delay(200)
+            UpdateSalesPriceHistoryGridAsync(form, userSession, dbSetting, entryView)
+            UpdatePurchasePriceHistoryGridAsync(form, userSession, dbSetting, entryView)
+            'End If
+        End Sub
+
+        ' When ItemCode changes
+        AddHandler entryView.CellValueChanged,
+        Sub(s, args)
+            If args.Column.FieldName = "ItemCode" Then
+                Dim itemCode = TryCast(args.Value, String)
+                If Not String.IsNullOrEmpty(itemCode) Then
+                    UpdateSalesPriceHistoryGridAsync(form, userSession, dbSetting, entryView)
+                    UpdatePurchasePriceHistoryGridAsync(form, userSession, dbSetting, entryView)
+                End If
+            End If
+        End Sub
+
+        If entryView.FocusedRowHandle >= 0 Then
+            UpdateSalesPriceHistoryGridAsync(form, userSession, dbSetting, entryView)
+            UpdatePurchasePriceHistoryGridAsync(form, userSession, dbSetting, entryView)
+        End If
+    End Sub
+    Private Async Function UpdateSalesPriceHistoryGridAsync(form As XtraForm,
+                                                        userSession As UserSession,
+                                                        dbSetting As DBSetting,
+                                                        entryView As DevExpress.XtraGrid.Views.Grid.GridView) As Task
+        If _isSalesOverlayLoading Then Return
+
+        If GetAllControls(form).OfType(Of DevExpress.XtraEditors.PanelControl)().
+        Any(Function(p) p.Name = "overlaySales" AndAlso p.Visible) Then Return
+
+        Dim handle = entryView.FocusedRowHandle
+        Dim itemCode = If(handle >= 0, TryCast(entryView.GetRowCellValue(handle, "ItemCode"), String), Nothing)
+
+        Dim salesGrid = GetAllControls(form) _
+        .OfType(Of DevExpress.XtraGrid.GridControl)() _
+        .FirstOrDefault(Function(g) g.Name = "gctrSalesPriceHistory")
+        If salesGrid Is Nothing Then Return
+
+        Dim loadingBar As New DevExpress.XtraEditors.MarqueeProgressBarControl With {
+            .Dock = DockStyle.Top,
+            .Visible = True,
+            .Text = "Loading sales price history"
+        }
+        loadingBar.Properties.ShowTitle = True
+        loadingBar.Properties.MarqueeAnimationSpeed = 50
+
+        form.BeginInvoke(Sub()
+                             'salesGrid.DataSource = Nothing
+                             'salesGrid.Controls.Add(loadingBar)
+                             salesGrid.Enabled = False
+                             salesGrid.Parent.Controls.Add(loadingBar)
+                             loadingBar.BringToFront()
+                         End Sub)
+
+        ' Run SQL in background
+        Dim history As DataTable = Await Task.Run(Function()
+                                                      Return LoadSalesPriceHistory(dbSetting, If(String.IsNullOrEmpty(itemCode), Nothing, itemCode))
+                                                  End Function)
+
+        ' Back on UI thread
+        form.BeginInvoke(Sub()
+                             'salesGrid.Controls.Remove(loadingBar)
+                             loadingBar.Parent.Controls.Remove(loadingBar)
+                             salesGrid.Enabled = True
+                             salesGrid.DataSource = history
+                         End Sub)
+    End Function
+    Private Async Function UpdatePurchasePriceHistoryGridAsync(form As XtraForm,
+                                                           userSession As UserSession,
+                                                           dbSetting As DBSetting,
+                                                           entryView As DevExpress.XtraGrid.Views.Grid.GridView) As Task
+        If _isPurchaseOverlayLoading Then Return
+
+        If GetAllControls(form).OfType(Of DevExpress.XtraEditors.PanelControl)().
+        Any(Function(p) p.Name = "overlayPurchase" AndAlso p.Visible) Then Return
+
+        Dim handle = entryView.FocusedRowHandle
+        Dim itemCode = If(handle >= 0, TryCast(entryView.GetRowCellValue(handle, "ItemCode"), String), Nothing)
+
+        'because autocount has the same name so need to specify here
+        Dim tabControl = GetTabControl(form)
+        If tabControl Is Nothing Then Return
+        Dim myTab = tabControl.TabPages.FirstOrDefault(Function(p) p.Name = "tabPurchasePriceHistory1")
+        If myTab Is Nothing Then Return
+
+        Dim purchaseGrid = myTab.Controls _
+        .OfType(Of DevExpress.XtraGrid.GridControl)() _
+        .FirstOrDefault(Function(g) g.Name = "gctrPurchasePriceHistory")
+        If purchaseGrid Is Nothing Then Return
+
+        Dim loadingBar As New DevExpress.XtraEditors.MarqueeProgressBarControl With {
+            .Dock = DockStyle.Top,
+            .Visible = True,
+            .Text = "Loading purchase price history"
+        }
+        loadingBar.Properties.ShowTitle = True
+        loadingBar.Properties.MarqueeAnimationSpeed = 50
+
+        form.BeginInvoke(Sub()
+                             'purchaseGrid.DataSource = Nothing
+                             purchaseGrid.Enabled = False
+                             purchaseGrid.Parent.Controls.Add(loadingBar)
+                             loadingBar.BringToFront()
+                         End Sub)
+
+        ' Run SQL in background
+        Dim history As DataTable = Await Task.Run(Function()
+                                                      Return LoadPurchasePriceHistory(dbSetting,
+                                                                                      If(String.IsNullOrEmpty(itemCode), Nothing, itemCode))
+                                                  End Function)
+
+        ' Back on UI thread
+        form.BeginInvoke(Sub()
+                             loadingBar.Parent.Controls.Remove(loadingBar)
+                             purchaseGrid.Enabled = True
+                             purchaseGrid.DataSource = history
+                         End Sub)
+    End Function
+
+    Public Sub AttachRibbonClick(form As XtraForm, userSession As UserSession, dbSetting As DBSetting)
+        _isSalesOverlayLoading = True
+        _isPurchaseOverlayLoading = True
+
+        form.BeginInvoke(CType(Sub()
+                                   Dim ribbonForm = TryCast(form, DevExpress.XtraBars.Ribbon.RibbonForm)
+                                   If ribbonForm Is Nothing OrElse ribbonForm.Ribbon Is Nothing Then Return
+
+                                   Dim ribbonCtrl = ribbonForm.Ribbon
+                                   Dim barBtn = ribbonCtrl.Items _
+                                   .OfType(Of DevExpress.XtraBars.BarButtonItem)() _
+                                   .FirstOrDefault(Function(b) b.Name = "barBtnShowInstantInfo")
+                                   If barBtn Is Nothing Then Return
+
+                                   If Not Object.Equals(barBtn.Tag, "PriceHistoryHandlerAttached") Then
+                                       AddHandler barBtn.ItemClick,
+                                   Async Sub(sender As Object, args As DevExpress.XtraBars.ItemClickEventArgs)
+                                       Dim tabControl = GetTabControl(form)
+                                       If tabControl Is Nothing Then Return
+
+                                       ' Create the tabs first (instant UI)
+                                       CreateSalesPriceHistoryTab(tabControl, userSession, dbSetting)
+                                       CreatePurchasePriceHistoryTab(tabControl, userSession, dbSetting)
+
+                                       ' locate tabs & grids
+                                       Dim salesTab = tabControl.TabPages.Cast(Of DevExpress.XtraTab.XtraTabPage)() _
+                                           .FirstOrDefault(Function(tp) tp.Name = "tabSalesPriceHistory")
+                                       Dim purchaseTab = tabControl.TabPages.Cast(Of DevExpress.XtraTab.XtraTabPage)() _
+                                           .FirstOrDefault(Function(tp) tp.Name = "tabPurchasePriceHistory1")
+
+                                       Dim salesGrid = salesTab?.Controls.OfType(Of DevExpress.XtraGrid.GridControl)().FirstOrDefault(Function(g) g.Name = "gctrSalesPriceHistory")
+                                       Dim purchaseGrid = purchaseTab?.Controls.OfType(Of DevExpress.XtraGrid.GridControl)().FirstOrDefault(Function(g) g.Name = "gctrPurchasePriceHistory")
+
+                                       ' Add overlay loading controls (keep references so we can remove them later)
+                                       Dim salesOverlay As DevExpress.XtraEditors.PanelControl = Nothing
+                                       Dim purchaseOverlay As DevExpress.XtraEditors.PanelControl = Nothing
+
+                                       form.BeginInvoke(Sub()
+                                                            If salesTab IsNot Nothing AndAlso salesGrid IsNot Nothing Then
+                                                                salesOverlay = New DevExpress.XtraEditors.PanelControl With {.Dock = DockStyle.Fill, .Name = "overlaySales"}
+                                                                Dim pb = New DevExpress.XtraEditors.MarqueeProgressBarControl With {
+                                                                    .Dock = DockStyle.Top, .Height = 18,
+                                                                    .Text = "Loading sales price history..."
+                                                                }
+                                                                pb.Properties.ShowTitle = True
+                                                                salesOverlay.Controls.Add(pb)
+                                                                salesTab.Controls.Add(salesOverlay)
+                                                                salesOverlay.BringToFront()
+                                                            End If
+
+                                                            If purchaseTab IsNot Nothing AndAlso purchaseGrid IsNot Nothing Then
+                                                                purchaseOverlay = New DevExpress.XtraEditors.PanelControl With {.Dock = DockStyle.Fill, .Name = "overlayPurchase"}
+                                                                Dim pb2 = New DevExpress.XtraEditors.MarqueeProgressBarControl With {
+                                                                    .Dock = DockStyle.Top, .Height = 18,
+                                                                    .Text = "Loading purchase price history..."
+                                                                }
+                                                                pb2.Properties.ShowTitle = True
+                                                                purchaseOverlay.Controls.Add(pb2)
+                                                                purchaseTab.Controls.Add(purchaseOverlay)
+                                                                purchaseOverlay.BringToFront()
+                                                            End If
+                                                        End Sub)
+
+                                       ' capture focused item code (if any) BEFORE background thread
+                                       Dim entryGrid = GetAllControls(form) _
+                                           .OfType(Of DevExpress.XtraGrid.GridControl)() _
+                                           .FirstOrDefault(Function(g) g.Name = "gridControlDetail")
+                                       Dim entryView = TryCast(If(entryGrid IsNot Nothing, entryGrid.MainView, Nothing), DevExpress.XtraGrid.Views.Grid.GridView)
+                                       Dim itemCode As String = Nothing
+                                       If entryView IsNot Nothing Then
+                                           Dim handle = entryView.FocusedRowHandle
+                                           itemCode = If(handle >= 0, TryCast(entryView.GetRowCellValue(handle, "ItemCode"), String), Nothing)
+                                       End If
+
+                                       ' Run DB calls in background thread
+                                       Dim dtSales As DataTable = Nothing
+                                       Dim dtPurchase As DataTable = Nothing
+
+                                       Try
+                                           Await Task.Run(Sub()
+                                                              dtSales = LoadSalesPriceHistory(dbSetting, If(String.IsNullOrEmpty(itemCode), Nothing, itemCode))
+                                                              dtPurchase = LoadPurchasePriceHistory(dbSetting, If(String.IsNullOrEmpty(itemCode), Nothing, itemCode))
+                                                          End Sub)
+                                       Catch ex As Exception
+                                           ' on error, remove overlays and show message
+                                           form.BeginInvoke(Sub()
+                                                                If salesOverlay IsNot Nothing Then salesTab.Controls.Remove(salesOverlay)
+                                                                If purchaseOverlay IsNot Nothing Then purchaseTab.Controls.Remove(purchaseOverlay)
+                                                                DevExpress.XtraEditors.XtraMessageBox.Show(form, "Error loading price history: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                                                            End Sub)
+                                           Return
+                                       End Try
+
+                                       ' Bind to grids on UI thread and remove overlays (do NOT Clear the tab controls)
+                                       form.BeginInvoke(Sub()
+                                                            If salesGrid IsNot Nothing Then
+                                                                Dim salesList = MapToPriceHistoryEntities(dtSales)
+                                                                salesGrid.DataSource = salesList
+                                                                PriceHistoryColumnProperties(salesGrid)
+                                                            End If
+                                                            If purchaseGrid IsNot Nothing Then
+                                                                Dim purList = MapToPriceHistoryEntities(dtPurchase)
+                                                                purchaseGrid.DataSource = purList
+                                                                PriceHistoryColumnProperties(purchaseGrid)
+                                                            End If
+
+                                                            If salesOverlay IsNot Nothing Then salesTab.Controls.Remove(salesOverlay)
+                                                            If purchaseOverlay IsNot Nothing Then purchaseTab.Controls.Remove(purchaseOverlay)
+
+                                                            _isSalesOverlayLoading = False
+                                                            _isPurchaseOverlayLoading = False
+                                                        End Sub)
+                                   End Sub
+
+                                       barBtn.Tag = "PriceHistoryHandlerAttached"
+                                   End If
+
+                               End Sub, MethodInvoker))
+    End Sub
+
+    Private Sub CreateSalesPriceHistoryTab(tabControl As DevExpress.XtraTab.XtraTabControl, session As UserSession, dbSetting As DBSetting)
+        If tabControl.TabPages.Cast(Of DevExpress.XtraTab.XtraTabPage)().Any(Function(p) p.Name = "tabSalesPriceHistory") Then Return
+
+        Dim salesTab As New DevExpress.XtraTab.XtraTabPage With {
+            .Name = "tabSalesPriceHistory",
+            .Text = "Sales Price History"
+        }
+
+        Dim grid As New DevExpress.XtraGrid.GridControl With {
+            .Dock = DockStyle.Fill,
+            .Name = "gctrSalesPriceHistory",
+            .UseEmbeddedNavigator = True
+        }
+        grid.EmbeddedNavigator.Buttons.Append.Visible = False
+        grid.EmbeddedNavigator.Buttons.Remove.Visible = False
+        grid.EmbeddedNavigator.Buttons.Edit.Visible = False
+        grid.EmbeddedNavigator.Buttons.EndEdit.Visible = False
+        grid.EmbeddedNavigator.Buttons.CancelEdit.Visible = False
+        grid.EmbeddedNavigator.TextLocation = DevExpress.XtraEditors.NavigatorButtonsTextLocation.Center
+
+        Dim view As New DevExpress.XtraGrid.Views.Grid.GridView(grid) With {
+            .Name = "gvSalesPriceHistory"
+        }
+        view.OptionsBehavior.Editable = False
+        view.OptionsView.ShowGroupPanel = False
+
+        grid.MainView = view
+        grid.ViewCollection.Add(view)
+
+        Dim AIng As New Utli.FreelyUtli(session, dbSetting)
+        AIng.AddLayoutManager(view, salesTab.Name)
+
+        ' initial placeholder (small DataTable to avoid null datasource)
+        Dim dtLoading As New DataTable()
+        dtLoading.Columns.Add("Status", GetType(String))
+        dtLoading.Rows.Add("Waiting to load...") ' placeholder text while user opens footer
+        grid.DataSource = dtLoading
+
+        salesTab.Controls.Add(grid)
+        tabControl.TabPages.Add(salesTab)
+
+        AddHandler view.DoubleClick, Sub(sender2, e2) HandleSalesPriceHistoryDoubleClick(session, sender2)
+
+        salesTab.BeginInvoke(CType(Sub() PriceHistoryColumnProperties(grid), MethodInvoker))
+    End Sub
+    Private Function LoadSalesPriceHistory(dbSetting As DBSetting, itemCode As String) As DataTable
+        Dim dt As New DataTable()
+        Dim sb As New StringBuilder()
+
+        ' List of document types
+        Dim docTypes() As String = {"SO", "DO", "IV", "CS", "CN", "DN"}
+        Dim docTypeDocStatus As New HashSet(Of String) From {"SO", "DO", "IV", "CN", "DN"}
+
+        sb.AppendLine(";WITH AllDocs AS (")
+
+        ' Loop through each doc type to build the SELECT statements
+        For i As Integer = 0 To docTypes.Length - 1
+            Dim docType = docTypes(i)
+            If i > 0 Then sb.AppendLine("UNION ALL")
+
+            Dim header = docType
+            Dim detail = docType & "DTL"
+            Dim hasStatus = docTypeDocStatus.Contains(docType)
+
+            sb.AppendLine($"
+                SELECT
+                    A.DocKey,
+                    A.DebtorCode AS AccNo,
+                    A.DebtorName AS CompanyName,
+                    A.DocNo,
+                    '{docType}' AS DocType,
+                    A.DocDate,
+                    A.BranchCode,
+                    B.ItemCode,
+                    B.Description,
+                    B.Desc2,
+                    ISNULL(B.BatchNo, '') AS BatchNo,
+                    B.UOM,
+                    g.CurrencyCode,
+                    B.Location,
+                    B.Qty,
+                    B.UnitPrice,
+                    B.SubTotal,
+                    ISNULL(B.Discount,0) AS Discount,
+                    D.AreaCode,
+                    A.LastModified,
+                    A.CreatedTimeStamp
+                FROM {header} A
+                INNER JOIN {detail} B ON A.DocKey = B.DocKey
+                INNER JOIN Debtor D ON A.DebtorCode = D.AccNo
+                LEFT JOIN GLMast g ON g.AccNo = A.DebtorCode
+                WHERE {(If(hasStatus, "A.DocStatus IN ('A','V') AND ", ""))} 
+                      (@ItemCode IS NULL OR B.ItemCode = @ItemCode)
+                      AND A.DocDate >= DATEADD(YEAR, -1, CAST(GETDATE() AS date))") '<--- added date within a year because it takes too long to process
+        Next
+
+        ' Add PastYearPriceHistory
+        sb.AppendLine("UNION ALL")
+        sb.AppendLine("
+            SELECT
+                A.DocKey,
+                A.AccNo,
+                C.CompanyName,
+                A.DocNo,
+                A.DocType,
+                A.DocDate,
+                A.BranchCode,
+                A.ItemCode,
+                B.Description,
+                B.Desc2,
+                ISNULL(A.BatchNo,'') AS BatchNo,
+                A.UOM,
+                g.CurrencyCode,
+                A.Location,
+                A.Qty,
+                A.UnitPrice,
+                A.SubTotal,
+                ISNULL(A.Discount,0) AS Discount,
+                C.AreaCode,
+                NULL AS LastModified,
+                NULL AS CreatedTimeStamp
+            FROM PastYearPriceHistory A
+            LEFT JOIN Item B ON B.ItemCode = A.ItemCode
+            LEFT JOIN Debtor C ON C.AccNo = A.AccNo
+            LEFT JOIN GLMast g ON g.AccNo = A.AccNo
+            WHERE (@ItemCode IS NULL OR A.ItemCode = @ItemCode)
+                  AND A.DocType IN ('SO','DO','IV','CS','CN','DN')
+                  AND A.DocDate >= DATEADD(YEAR, -1, CAST(GETDATE() AS date))") '<--- added date within a year because it takes too long to process
+
+        sb.AppendLine("),")
+        sb.AppendLine("Ranked AS (")
+        sb.AppendLine("    SELECT *,")
+        sb.AppendLine("           ROW_NUMBER() OVER (")
+        sb.AppendLine("               PARTITION BY ItemCode, DocType")
+        sb.AppendLine("               ORDER BY DocDate DESC,")
+        'sb.AppendLine("                        CASE")
+        'sb.AppendLine("                            WHEN DocType = 'DN' THEN 1")
+        'sb.AppendLine("                            WHEN DocType = 'CN' THEN 1")
+        'sb.AppendLine("                            WHEN DocType = 'CS' THEN 2")
+        'sb.AppendLine("                            WHEN DocType = 'IV' THEN 2")
+        'sb.AppendLine("                            WHEN DocType = 'DO' THEN 3")
+        'sb.AppendLine("                            WHEN DocType = 'SO' THEN 4")
+        'sb.AppendLine("                            ELSE 99")
+        'sb.AppendLine("                        END,")
+        sb.AppendLine("                        DocKey DESC")
+        sb.AppendLine("           ) AS rn")
+        sb.AppendLine("      FROM AllDocs")
+        sb.AppendLine(")")
+        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode, Discount,")
+        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+        sb.AppendLine("  FROM Ranked")
+        sb.AppendLine(" WHERE rn <= 5")
+        sb.AppendLine(" ORDER BY ItemCode,")
+        sb.AppendLine("          CASE")
+        sb.AppendLine("              WHEN DocType = 'DN' THEN 1")
+        sb.AppendLine("              WHEN DocType = 'CN' THEN 2")
+        sb.AppendLine("              WHEN DocType = 'CS' THEN 3")
+        sb.AppendLine("              WHEN DocType = 'IV' THEN 4")
+        sb.AppendLine("              WHEN DocType = 'DO' THEN 5")
+        sb.AppendLine("              WHEN DocType = 'SO' THEN 6")
+        sb.AppendLine("              ELSE 99")
+        sb.AppendLine("          END,")
+        sb.AppendLine("          DocDate DESC,")
+        sb.AppendLine("          DocKey DESC;")
+
+        Dim sql As String = sb.ToString()
+
+        Using sqlconn As New SqlConnection(dbSetting.ConnectionString)
+            Using cmd As New SqlCommand(sql, sqlconn)
+                Using da As New SqlDataAdapter(cmd)
+                    ' Pass parameter (NULL or item code)
+                    If String.IsNullOrEmpty(itemCode) Then
+                        cmd.Parameters.AddWithValue("@ItemCode", DBNull.Value)
+                    Else
+                        cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+                    End If
+
+                    da.Fill(dt)
+                End Using
+            End Using
+        End Using
+
+        Return dt
+    End Function
+    Private Sub HandleSalesPriceHistoryDoubleClick(session As UserSession, sender2 As Object)
+        Dim gv = TryCast(sender2, DevExpress.XtraGrid.Views.Grid.GridView)
+        If gv Is Nothing Then Return
+
+        Dim pt = gv.GridControl.PointToClient(Control.MousePosition)
+        Dim hitInfo = gv.CalcHitInfo(pt)
+        If Not (hitInfo.InRow OrElse hitInfo.InRowCell) Then Return
+
+        Dim docKeyObj = gv.GetRowCellValue(hitInfo.RowHandle, "DocKey")
+        Dim docType As String = Convert.ToString(gv.GetRowCellValue(hitInfo.RowHandle, "DocType"))
+
+        If docKeyObj Is Nothing OrElse String.IsNullOrEmpty(docType) Then Return
+
+        Dim docKey As Long = Convert.ToInt64(docKeyObj)
+
+        Select Case docType
+            Case "SO"
+                AutoCount.Invoicing.Sales.SalesOrder.FormSalesOrderCmd.ViewDocument(session, docKey)
+            Case "DO"
+                AutoCount.Invoicing.Sales.DeliveryOrder.FormDeliveryOrderCmd.ViewDocument(session, docKey)
+            Case "IV"
+                AutoCount.Invoicing.Sales.Invoice.FormInvoiceCmd.ViewDocument(session, docKey)
+            Case "CS"
+                AutoCount.Invoicing.Sales.CashSale.FormCashSaleCmd.ViewDocument(session, docKey)
+            Case "CN"
+                AutoCount.Invoicing.Sales.CreditNote.FormCreditNoteCmd.ViewDocument(session, docKey)
+            Case "DN"
+                AutoCount.Invoicing.Sales.DebitNote.FormDebitNoteCmd.ViewDocument(session, docKey)
+        End Select
+    End Sub
+
+    Private Sub CreatePurchasePriceHistoryTab(tabControl As DevExpress.XtraTab.XtraTabControl, session As UserSession, dbSetting As DBSetting)
+        If tabControl.TabPages.Cast(Of DevExpress.XtraTab.XtraTabPage)().Any(Function(p) p.Name = "tabPurchasePriceHistory1") Then Return
+
+        Dim purchaseTab As New DevExpress.XtraTab.XtraTabPage With {
+            .Name = "tabPurchasePriceHistory1",
+            .Text = "Purchase Price History"
+        }
+
+        Dim grid As New DevExpress.XtraGrid.GridControl With {
+            .Dock = DockStyle.Fill,
+            .Name = "gctrPurchasePriceHistory",
+            .UseEmbeddedNavigator = True
+        }
+        grid.EmbeddedNavigator.Buttons.Append.Visible = False
+        grid.EmbeddedNavigator.Buttons.Remove.Visible = False
+        grid.EmbeddedNavigator.Buttons.Edit.Visible = False
+        grid.EmbeddedNavigator.Buttons.EndEdit.Visible = False
+        grid.EmbeddedNavigator.Buttons.CancelEdit.Visible = False
+        grid.EmbeddedNavigator.TextLocation = DevExpress.XtraEditors.NavigatorButtonsTextLocation.Center
+
+        Dim view As New DevExpress.XtraGrid.Views.Grid.GridView(grid) With {
+            .Name = "gvPurchasePriceHistory"
+        }
+        view.OptionsBehavior.Editable = False
+        view.OptionsView.ShowGroupPanel = False
+
+        grid.MainView = view
+        grid.ViewCollection.Add(view)
+
+        Dim AIng As New Utli.FreelyUtli(session, dbSetting)
+        AIng.AddLayoutManager(view, purchaseTab.Name)
+
+        Dim dtLoading As New DataTable()
+        dtLoading.Columns.Add("Status", GetType(String))
+        dtLoading.Rows.Add("Waiting to load...")
+        grid.DataSource = dtLoading
+
+        purchaseTab.Controls.Add(grid)
+        tabControl.TabPages.Add(purchaseTab)
+
+        AddHandler view.DoubleClick, Sub(sender2, e2) HandlePurchasePriceHistoryDoubleClick(session, sender2)
+
+        purchaseTab.BeginInvoke(CType(Sub() PriceHistoryColumnProperties(grid), MethodInvoker))
+    End Sub
+    Private Function LoadPurchasePriceHistory(dbSetting As DBSetting, itemCode As String) As DataTable
+        Dim dt As New DataTable()
+        Dim sb As New StringBuilder()
+
+        Dim docTypes As String() = {"PO", "GR", "PI"} ' You can add more document types here
+        Dim isFirst As Boolean = True
+
+        sb.AppendLine(";WITH AllDocs AS (")
+
+        For Each docType In docTypes
+            If Not isFirst Then sb.AppendLine("UNION ALL")
+            isFirst = False
+
+            ' Determine table names
+            Dim headerTable As String = docType
+            Dim detailTable As String = docType & "DTL"
+
+            sb.AppendLine($"
+                SELECT
+                    A.DocKey,
+                    A.CreditorCode AS AccNo,
+                    C.CompanyName,
+                    A.DocNo,
+                    '{docType}' AS DocType,
+                    A.DocDate,
+                    A.BranchCode,
+                    B.ItemCode,
+                    B.Description,
+                    B.Desc2,
+                    ISNULL(B.BatchNo,'') AS BatchNo,
+                    B.UOM,
+                    g.CurrencyCode,
+                    B.Location,
+                    B.Qty,
+                    B.UnitPrice,
+                    B.SubTotal,
+                    B.Discount,
+                    C.AreaCode,
+                    A.LastModified,
+                    A.CreatedTimeStamp
+                FROM {headerTable} A
+                INNER JOIN {detailTable} B ON A.DocKey = B.DocKey
+                INNER JOIN Creditor C ON A.CreditorCode = C.AccNo
+                LEFT JOIN GLMast g ON g.AccNo = A.CreditorCode
+                WHERE (@ItemCode IS NULL OR B.ItemCode = @ItemCode)
+                      AND A.DocDate >= DATEADD(YEAR, -1, CAST(GETDATE() AS date))") '<--- added date within a year because it takes too long to process
+        Next
+
+        ' Add PastYearPriceHistory separately
+        sb.AppendLine("UNION ALL
+            SELECT
+                A.DocKey,
+                A.AccNo,
+                C.CompanyName,
+                A.DocNo,
+                A.DocType,
+                A.DocDate,
+                A.BranchCode,
+                A.ItemCode,
+                B.Description,
+                B.Desc2,
+                ISNULL(A.BatchNo,'') AS BatchNo,
+                A.UOM,
+                g.CurrencyCode,
+                A.Location,
+                A.Qty,
+                A.UnitPrice,
+                A.SubTotal,
+                A.Discount,
+                C.AreaCode,
+                NULL AS LastModified,
+                NULL AS CreatedTimeStamp
+            FROM PastYearPriceHistory A
+            LEFT JOIN Item B ON B.ItemCode = A.ItemCode
+            LEFT JOIN Creditor C ON C.AccNo = A.AccNo
+            LEFT JOIN GLMast g ON g.AccNo = A.AccNo
+            WHERE (@ItemCode IS NULL OR A.ItemCode = @ItemCode)
+                  AND A.DocType IN ('PO','GR','PI')
+                  AND A.DocDate >= DATEADD(YEAR, -1, CAST(GETDATE() AS date))") '<--- added date within a year because it takes too long to process
+
+        sb.AppendLine("),")
+        sb.AppendLine("Ranked AS (")
+        sb.AppendLine("    SELECT *,")
+        sb.AppendLine("           ROW_NUMBER() OVER (")
+        sb.AppendLine("               PARTITION BY ItemCode, DocType")
+        sb.AppendLine("               ORDER BY DocDate DESC,")
+        'sb.AppendLine("                        CASE DocType WHEN 'PI' THEN 1 WHEN 'GR' THEN 2 WHEN 'PO' THEN 3 ELSE 99 END,")
+        sb.AppendLine("                        DocKey DESC")
+        sb.AppendLine("           ) AS rn")
+        sb.AppendLine("    FROM AllDocs")
+        sb.AppendLine(")")
+        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode, Discount,")
+        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+        sb.AppendLine("FROM Ranked")
+        sb.AppendLine("WHERE rn <= 5")
+        sb.AppendLine("ORDER BY ItemCode,")
+        sb.AppendLine("         CASE DocType WHEN 'PI' THEN 1 WHEN 'GR' THEN 2 WHEN 'PO' THEN 3 ELSE 99 END,")
+        sb.AppendLine("         DocDate DESC, DocKey DESC;")
+
+        Dim sql As String = sb.ToString()
+
+        Using sqlconn As New SqlConnection(dbSetting.ConnectionString)
+            Using cmd As New SqlCommand(sql, sqlconn)
+                ' Add @ItemCode parameter safely
+                If String.IsNullOrEmpty(itemCode) Then
+                    cmd.Parameters.AddWithValue("@ItemCode", DBNull.Value)
+                Else
+                    cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+                End If
+
+                Using da As New SqlDataAdapter(cmd)
+                    da.Fill(dt)
+                End Using
+            End Using
+        End Using
+
+        Return dt
+    End Function
+    Private Sub HandlePurchasePriceHistoryDoubleClick(session As UserSession, sender2 As Object)
+        Dim gv = TryCast(sender2, DevExpress.XtraGrid.Views.Grid.GridView)
+        If gv Is Nothing Then Return
+
+        Dim pt = gv.GridControl.PointToClient(Control.MousePosition)
+        Dim hitInfo = gv.CalcHitInfo(pt)
+        If Not (hitInfo.InRow OrElse hitInfo.InRowCell) Then Return
+
+        Dim docKeyObj = gv.GetRowCellValue(hitInfo.RowHandle, "DocKey")
+        Dim docType = TryCast(gv.GetRowCellValue(hitInfo.RowHandle, "DocType"), String)
+        If docKeyObj Is Nothing OrElse String.IsNullOrEmpty(docType) Then Return
+
+        Dim docKey As Long = Convert.ToInt64(docKeyObj)
+
+        Select Case docType
+            Case "PO"
+                AutoCount.Invoicing.Purchase.PurchaseOrder.FormPurchaseOrderCmd.ViewDocument(session, docKey)
+            Case "GR"
+                AutoCount.Invoicing.Purchase.GoodsReceivedNote.FormGoodsReceivedNoteCmd.ViewDocument(session, docKey)
+            Case "PI"
+                AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceCmd.ViewDocument(session, docKey)
+        End Select
+    End Sub
+
+    Public Shared Function MapToPriceHistoryEntities(dt As DataTable) As List(Of PriceHistoryEntity)
+        Dim list As New List(Of PriceHistoryEntity)()
+        For Each row As DataRow In dt.Rows
+            Dim entity As New PriceHistoryEntity With {
+            .DocKey = If(row("DocKey") IsNot DBNull.Value, Convert.ToInt64(row("DocKey")), 0),
+            .DocNo = TryCast(row("DocNo"), String),
+            .DocType = TryCast(row("DocType"), String),
+            .DocDate = If(row("DocDate") IsNot DBNull.Value, Convert.ToDateTime(row("DocDate")), DateTime.MinValue),
+            .BranchCode = TryCast(row("BranchCode"), String),
+            .AreaCode = TryCast(row("AreaCode"), String),
+            .LastModified = If(row("LastModified") IsNot DBNull.Value, Convert.ToDateTime(row("LastModified")), DateTime.MinValue),
+            .CreatedTimeStamp = If(row("CreatedTimeStamp") IsNot DBNull.Value, Convert.ToDateTime(row("CreatedTimeStamp")), DateTime.MinValue),
+            .AccNo = TryCast(row("AccNo"), String),
+            .CompanyName = TryCast(row("CompanyName"), String),
+            .ItemCode = TryCast(row("ItemCode"), String),
+            .Description = TryCast(row("Description"), String),
+            .Desc2 = TryCast(row("Desc2"), String),
+            .BatchNo = TryCast(row("BatchNo"), String),
+            .UOM = TryCast(row("UOM"), String),
+            .Location = TryCast(row("Location"), String),
+            .Qty = If(row("Qty") IsNot DBNull.Value, Convert.ToDecimal(row("Qty")), 0D),
+            .UnitPrice = If(row("UnitPrice") IsNot DBNull.Value, Convert.ToDecimal(row("UnitPrice")), 0D),
+            .SubTotal = If(row("SubTotal") IsNot DBNull.Value, Convert.ToDecimal(row("SubTotal")), 0D),
+            .Discount = TryCast(row("Discount"), String),
+            .CurrencyCode = TryCast(row("CurrencyCode"), String)
+        }
+            list.Add(entity)
+        Next
+        Return list
+    End Function
+    Private Sub PriceHistoryColumnProperties(grid As DevExpress.XtraGrid.GridControl)
+        Dim gv = TryCast(grid.MainView, DevExpress.XtraGrid.Views.Grid.GridView)
+        If gv Is Nothing Then Return
+
+        gv.PopulateColumns()
+
+        SetColumn(gv, NameOf(PriceHistoryEntity.DocKey), False, True)
+        SetColumn(gv, NameOf(PriceHistoryEntity.Desc2), False, True)
+        SetColumn(gv, NameOf(PriceHistoryEntity.BranchCode), False, True)
+        SetColumn(gv, NameOf(PriceHistoryEntity.AreaCode), False, True)
+        SetColumn(gv, NameOf(PriceHistoryEntity.CurrencyCode), False, True)
+        SetColumn(gv, NameOf(PriceHistoryEntity.DocDate), True, True, "dd/MM/yyyy")
+        SetColumn(gv, NameOf(PriceHistoryEntity.CreatedTimeStamp), False, True, "dd/MM/yyyy HH:mm:ss")
+        SetColumn(gv, NameOf(PriceHistoryEntity.LastModified), False, True, "dd/MM/yyyy HH:mm:ss")
+
+        Dim itemCodeCol = gv.Columns.ColumnByFieldName(NameOf(PriceHistoryEntity.ItemCode))
+        If itemCodeCol IsNot Nothing Then
+            itemCodeCol.Summary.Clear()
+            itemCodeCol.Summary.Add(DevExpress.Data.SummaryItemType.Count, NameOf(PriceHistoryEntity.ItemCode), "Record {0} of {1}")
+        End If
+
+        gv.RefreshData()
+    End Sub
+    Private Sub SetColumn(gv As DevExpress.XtraGrid.Views.Grid.GridView, fieldName As String, visible As Boolean, showInCustomizationForm As Boolean, Optional format As String = Nothing)
+        Dim col = gv.Columns.ColumnByFieldName(fieldName)
+        If col Is Nothing Then Return
+
+        col.Visible = visible
+        col.OptionsColumn.ShowInCustomizationForm = showInCustomizationForm
+
+        If Not String.IsNullOrEmpty(format) Then
+            col.DisplayFormat.FormatType = DevExpress.Utils.FormatType.DateTime
+            col.DisplayFormat.FormatString = format
+        End If
+    End Sub
+
+#End Region
+
+#Region "OLD CODE V2"
+    Private Sub AttachEntryGridEventsV1(form As XtraForm, userSession As UserSession, dbSetting As DBSetting)
+        Dim entryGrid = GetAllControls(form) _
+        .OfType(Of DevExpress.XtraGrid.GridControl)() _
+        .FirstOrDefault(Function(g) g.Name = "gridControlDetail")
+
+        Dim entryView = TryCast(entryGrid?.MainView, DevExpress.XtraGrid.Views.Grid.GridView)
+        If entryView IsNot Nothing Then
+            AddHandler entryView.FocusedRowChanged,
+            Sub(s, args)
+                UpdateSalesPriceHistoryGrid(form, userSession, dbSetting, entryView)
+                UpdatePurchasePriceHistoryGrid(form, userSession, dbSetting, entryView)
+            End Sub
+
+            AddHandler entryView.CellValueChanged,
+            Sub(s, args)
+                If args.Column.FieldName = "ItemCode" Then
+                    UpdateSalesPriceHistoryGrid(form, userSession, dbSetting, entryView)
+                    UpdatePurchasePriceHistoryGrid(form, userSession, dbSetting, entryView)
+                End If
+            End Sub
+        End If
+    End Sub
+    Public Sub AttachRibbonClickV1(form As XtraForm, userSession As UserSession, dbSetting As DBSetting)
+        ' Wait until the form is fully loaded
+        form.BeginInvoke(CType(Sub()
+                                   Dim ribbonForm = TryCast(form, DevExpress.XtraBars.Ribbon.RibbonForm)
+                                   If ribbonForm Is Nothing OrElse ribbonForm.Ribbon Is Nothing Then Return
+
+                                   Dim ribbonCtrl = ribbonForm.Ribbon
+                                   Dim barBtn = ribbonCtrl.Items _
+                                   .OfType(Of DevExpress.XtraBars.BarButtonItem)() _
+                                   .FirstOrDefault(Function(b) b.Name = "barBtnShowInstantInfo")
+                                   If barBtn Is Nothing Then Return
+
+                                   ' Attach only once
+                                   If Not Object.Equals(barBtn.Tag, "PriceHistoryHandlerAttached") Then
+                                       AddHandler barBtn.ItemClick,
+                                       Sub(sender As Object, args As DevExpress.XtraBars.ItemClickEventArgs)
+                                           Dim tabControl = GetTabControl(form)
+                                           If tabControl Is Nothing Then Return
+
+                                           CreateSalesPriceHistoryTab(tabControl, userSession, dbSetting)
+                                           CreatePurchasePriceHistoryTab(tabControl, userSession, dbSetting)
+
+                                           Dim entryGrid = GetAllControls(form) _
+                                                .OfType(Of DevExpress.XtraGrid.GridControl)() _
+                                                .FirstOrDefault(Function(g) g.Name = "gridControlDetail")
+
+                                           Dim entryView = TryCast(If(entryGrid IsNot Nothing, entryGrid.MainView, Nothing), DevExpress.XtraGrid.Views.Grid.GridView)
+                                           If entryView IsNot Nothing Then
+                                               UpdateSalesPriceHistoryGrid(form, userSession, dbSetting, entryView)
+                                               UpdatePurchasePriceHistoryGrid(form, userSession, dbSetting, entryView)
+                                           End If
+                                       End Sub
+                                       barBtn.Tag = "PriceHistoryHandlerAttached"
+                                   End If
+
+                               End Sub, MethodInvoker))
+    End Sub
+    Private Sub UpdateSalesPriceHistoryGrid(form As XtraForm,
+                                            userSession As UserSession,
+                                            dbSetting As DBSetting,
+                                            entryView As DevExpress.XtraGrid.Views.Grid.GridView)
+
+        Dim handle = entryView.FocusedRowHandle
+        Dim itemCode = If(handle >= 0, TryCast(entryView.GetRowCellValue(handle, "ItemCode"), String), Nothing)
+
+        Dim history = LoadSalesPriceHistory(dbSetting, If(String.IsNullOrEmpty(itemCode), Nothing, itemCode))
+
+        Dim salesGrid = GetAllControls(form) _
+        .OfType(Of DevExpress.XtraGrid.GridControl)() _
+        .FirstOrDefault(Function(g) g.Name = "gctrSalesPriceHistory")
+
+        If salesGrid IsNot Nothing Then
+            salesGrid.DataSource = history
+        End If
+    End Sub
+    Private Sub UpdatePurchasePriceHistoryGrid(form As XtraForm,
+                                               userSession As UserSession,
+                                               dbSetting As DBSetting,
+                                               entryView As DevExpress.XtraGrid.Views.Grid.GridView)
+
+        Dim handle = entryView.FocusedRowHandle
+        Dim itemCode = If(handle >= 0, TryCast(entryView.GetRowCellValue(handle, "ItemCode"), String), Nothing)
+
+        Dim history = LoadPurchasePriceHistory(dbSetting, If(String.IsNullOrEmpty(itemCode), Nothing, itemCode))
+
+        Dim tabControl = GetTabControl(form)
+        If tabControl Is Nothing Then Return
+
+        ' Must check tab name manually because AutoCount reuses same names
+        Dim myTab = tabControl.TabPages.FirstOrDefault(Function(p) p.Name = "tabPurchasePriceHistory1")
+        If myTab Is Nothing Then Return
+
+        Dim purchaseGrid = myTab.Controls _
+        .OfType(Of DevExpress.XtraGrid.GridControl)() _
+        .FirstOrDefault(Function(g) g.Name = "gctrPurchasePriceHistory")
+
+        If purchaseGrid IsNot Nothing Then
+            purchaseGrid.DataSource = history
+        End If
+    End Sub
+    Private Sub CreateSalesPriceHistoryTabV1(tabControl As DevExpress.XtraTab.XtraTabControl, session As UserSession, dbSetting As DBSetting)
+
+        If tabControl.TabPages.Cast(Of DevExpress.XtraTab.XtraTabPage)().Any(Function(p) p.Name = "tabSalesPriceHistory") Then Return
+
+        Dim salesTab As New DevExpress.XtraTab.XtraTabPage With {
+            .Name = "tabSalesPriceHistory",
+            .Text = "Sales Price History"
+        }
+
+        Dim grid As New DevExpress.XtraGrid.GridControl With {
+            .Dock = DockStyle.Fill,
+            .Name = "gctrSalesPriceHistory"
+        }
+
+        Dim view As New DevExpress.XtraGrid.Views.Grid.GridView(grid) With {
+            .Name = "gvSalesPriceHistory"
+        }
+        view.OptionsBehavior.Editable = False
+        view.OptionsView.ShowGroupPanel = False
+
+        grid.MainView = view
+        grid.ViewCollection.Add(view)
+
+        Dim dt = LoadSalesPriceHistory(dbSetting, Nothing)
+        Dim historyList = MapToPriceHistoryEntities(dt)
+        grid.DataSource = historyList
+
+        salesTab.Controls.Add(grid)
+        tabControl.TabPages.Add(salesTab)
+
+        salesTab.BeginInvoke(DirectCast(Sub()
+                                            PriceHistoryColumnProperties(grid)
+                                        End Sub, MethodInvoker))
+        'salesTab.BeginInvoke(CType(Sub() PriceHistoryColumnProperties(grid), MethodInvoker))
+
+        AddHandler view.DoubleClick, Sub(sender2, e2) HandleSalesPriceHistoryDoubleClick(session, sender2)
+    End Sub
+    Private Sub CreatePurchasePriceHistoryTabV1(tabControl As DevExpress.XtraTab.XtraTabControl, session As UserSession, dbSetting As DBSetting)
+
+        If tabControl.TabPages.Cast(Of DevExpress.XtraTab.XtraTabPage)().Any(Function(p) p.Name = "tabPurchasePriceHistory1") Then Return
+
+        Dim purchaseTab As New DevExpress.XtraTab.XtraTabPage With {
+            .Name = "tabPurchasePriceHistory1",
+            .Text = "Purchase Price History"
+        }
+
+        Dim grid As New DevExpress.XtraGrid.GridControl With {
+            .Dock = DockStyle.Fill,
+            .Name = "gctrPurchasePriceHistory"
+        }
+
+        Dim view As New DevExpress.XtraGrid.Views.Grid.GridView(grid) With {
+            .Name = "gvPurchasePriceHistory"
+        }
+        view.OptionsBehavior.Editable = False
+        view.OptionsView.ShowGroupPanel = False
+
+        grid.MainView = view
+        grid.ViewCollection.Add(view)
+
+        Dim dt = LoadPurchasePriceHistory(dbSetting, Nothing)
+        Dim historyList = MapToPriceHistoryEntities(dt)
+        grid.DataSource = historyList
+
+        purchaseTab.Controls.Add(grid)
+        tabControl.TabPages.Add(purchaseTab)
+
+        purchaseTab.BeginInvoke(DirectCast(Sub()
+                                               PriceHistoryColumnProperties(grid)
+                                           End Sub, MethodInvoker))
+
+        AddHandler view.DoubleClick, Sub(sender2, e2) HandlePurchasePriceHistoryDoubleClick(session, sender2)
+    End Sub
+    Private Function LoadSalesPriceHistoryV2(dbSetting As DBSetting, itemCode As String) As DataTable
+        Dim dt As New DataTable()
+        Dim sb As New StringBuilder()
+
+        Dim docTypes() As String = {"SO", "DO", "IV", "CS", "CN", "DN"}
+        Dim docTypeDocStatus As New HashSet(Of String) From {"SO", "DO", "IV", "CN", "DN"}
+
+        sb.AppendLine(";WITH AllDocs AS (")
+
+        For i As Integer = 0 To docTypes.Length - 1
+            Dim docType = docTypes(i)
+            If i > 0 Then sb.AppendLine("UNION ALL")
+
+            Dim header = docType
+            Dim detail = docType & "DTL"
+            Dim hasStatus = docTypeDocStatus.Contains(docType)
+
+            ' Note the TOP 100 and dynamic filter inside WHERE
+            sb.AppendLine($"
+                SELECT
+                       A.DocKey,
+                       A.DebtorCode AS AccNo,
+                       A.DebtorName AS CompanyName,
+                       A.DocNo,
+                       '{docType}' AS DocType,
+                       A.DocDate,
+                       A.BranchCode,
+                       B.ItemCode,
+                       B.Description,
+                       B.Desc2,
+                       ISNULL(B.BatchNo, '') AS BatchNo,
+                       B.UOM,
+                       g.CurrencyCode,
+                       B.Location,
+                       B.Qty,
+                       B.UnitPrice,
+                       B.SubTotal,
+                       D.AreaCode,
+                       A.LastModified,
+                       A.CreatedTimeStamp
+                  FROM {header} A
+                  INNER JOIN {detail} B ON A.DocKey = B.DocKey
+                  INNER JOIN Debtor D ON A.DebtorCode = D.AccNo
+                  LEFT JOIN GLMast g ON g.AccNo = A.DebtorCode
+                  WHERE {(If(hasStatus, "A.DocStatus IN ('A','V') AND ", ""))} 
+                        (@ItemCode IS NULL OR B.ItemCode = @ItemCode)")
+        Next
+
+        sb.AppendLine("),")
+        sb.AppendLine("Ranked AS (")
+        sb.AppendLine("    SELECT *,")
+        sb.AppendLine("           ROW_NUMBER() OVER (")
+        sb.AppendLine("               PARTITION BY ItemCode")
+        sb.AppendLine("               ORDER BY DocDate DESC, DocKey DESC")
+        sb.AppendLine("           ) AS rn")
+        sb.AppendLine("      FROM AllDocs")
+        sb.AppendLine(")")
+        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode,")
+        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+        sb.AppendLine("  FROM Ranked")
+        sb.AppendLine(" WHERE rn <= 5")
+        sb.AppendLine(" ORDER BY ItemCode, DocDate DESC, DocNo DESC, AccNo;")
+
+        Dim sql As String = sb.ToString()
+
+        Using sqlconn As New SqlConnection(dbSetting.ConnectionString)
+            Using cmd As New SqlCommand(sql, sqlconn)
+                Using da As New SqlDataAdapter(cmd)
+                    ' Pass parameter (NULL or item code)
+                    If String.IsNullOrEmpty(itemCode) Then
+                        cmd.Parameters.AddWithValue("@ItemCode", DBNull.Value)
+                    Else
+                        cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+                    End If
+
+                    da.Fill(dt)
+                End Using
+            End Using
+        End Using
+
+        Return dt
+    End Function
+    Private Function LoadPurchasePriceHistoryV2(dbSetting As DBSetting, itemCode As String) As DataTable
+        Dim dt As New DataTable()
+        Dim sb As New StringBuilder()
+
+        Dim docTypes() As String = {"PO", "GR", "PI"}
+
+        sb.AppendLine(";WITH AllDocs AS (")
+
+        For i As Integer = 0 To docTypes.Length - 1
+            Dim docType = docTypes(i)
+            If i > 0 Then sb.AppendLine("UNION ALL")
+
+            Dim header = docType
+            Dim detail = docType & "DTL"
+
+            sb.AppendLine($"
+                SELECT
+                    A.DocKey,
+                    A.CreditorCode AS AccNo,
+                    A.CreditorName AS CompanyName,
+                    A.DocNo,
+                    '{docType}' AS DocType,
+                    A.DocDate,
+                    A.BranchCode,
+                    B.ItemCode,
+                    B.Description,
+                    B.Desc2,
+                    ISNULL(B.BatchNo, '') AS BatchNo,
+                    B.UOM,
+                    g.CurrencyCode,
+                    B.Location,
+                    B.Qty,
+                    B.UnitPrice,
+                    B.SubTotal,
+                    C.AreaCode,
+                    A.LastModified,
+                    A.CreatedTimeStamp
+                FROM {header} A
+                INNER JOIN {detail} B ON A.DocKey = B.DocKey
+                INNER JOIN Creditor C ON A.CreditorCode = C.AccNo
+                LEFT JOIN GLMast g ON g.AccNo = A.CreditorCode
+                WHERE (@ItemCode IS NULL OR B.ItemCode = @ItemCode)")
+        Next
+
+        sb.AppendLine("),")
+        sb.AppendLine("Ranked AS (")
+        sb.AppendLine("    SELECT *,")
+        sb.AppendLine("           ROW_NUMBER() OVER (")
+        sb.AppendLine("               PARTITION BY ItemCode")
+        sb.AppendLine("               ORDER BY DocDate DESC, DocKey DESC")
+        sb.AppendLine("           ) AS rn")
+        sb.AppendLine("    FROM AllDocs")
+        sb.AppendLine(")")
+        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode,")
+        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+        sb.AppendLine("  FROM Ranked")
+        sb.AppendLine(" WHERE rn <= 5")
+        sb.AppendLine(" ORDER BY ItemCode, DocDate DESC, DocNo DESC, AccNo;")
+
+        Dim sql As String = sb.ToString()
+
+        Using sqlconn As New SqlConnection(dbSetting.ConnectionString)
+            Using cmd As New SqlCommand(sql, sqlconn)
+                Using da As New SqlDataAdapter(cmd)
+                    ' Add @ItemCode parameter safely
+                    If String.IsNullOrEmpty(itemCode) Then
+                        cmd.Parameters.AddWithValue("@ItemCode", DBNull.Value)
+                    Else
+                        cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+                    End If
+
+                    da.Fill(dt)
+                End Using
+            End Using
+        End Using
+
+        Return dt
+    End Function
+    Private Function LoadPurchasePriceHistoryORI(dbSetting As DBSetting, itemCode As String) As DataTable
+        Dim dt As New DataTable()
+        Dim sb As New StringBuilder()
+
+        Dim docTypes() As String = {"PO", "GR", "PI"}
+
+        sb.AppendLine(";WITH AllDocs AS (")
+
+        For i As Integer = 0 To docTypes.Length - 1
+            Dim docType = docTypes(i)
+            If i > 0 Then sb.AppendLine("UNION ALL")
+
+            Dim header = docType
+            Dim detail = docType & "DTL"
+
+            sb.AppendLine($"
+            SELECT 
+                A.DocKey,
+                A.CreditorCode AS AccNo,
+                A.CreditorName AS CompanyName,
+                A.DocNo,
+                '{docType}' AS DocType,
+                A.DocDate,
+                A.BranchCode,
+                B.ItemCode,
+                B.Description,
+                B.Desc2,
+                ISNULL(B.BatchNo, '') AS BatchNo,
+                B.UOM,
+                g.CurrencyCode,
+                B.Location,
+                B.Qty,
+                B.UnitPrice,
+                B.SubTotal,
+                C.AreaCode,
+                A.LastModified,
+                A.CreatedTimeStamp
+            FROM {header} A
+            INNER JOIN {detail} B ON A.DocKey = B.DocKey
+            INNER JOIN Creditor C ON A.CreditorCode = C.AccNo
+            LEFT JOIN GLMast g ON g.AccNo = A.CreditorCode")
+        Next
+
+        sb.AppendLine("),")
+        sb.AppendLine("Ranked AS (")
+        sb.AppendLine("    SELECT *,")
+        sb.AppendLine("           ROW_NUMBER() OVER (")
+        sb.AppendLine("               PARTITION BY ItemCode")
+        sb.AppendLine("               ORDER BY DocDate DESC, DocKey DESC")
+        sb.AppendLine("           ) AS rn")
+        sb.AppendLine("    FROM AllDocs")
+        sb.AppendLine(")")
+        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode,")
+        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+        sb.AppendLine("  FROM Ranked")
+        sb.AppendLine(" WHERE rn <= 5")
+
+        If Not String.IsNullOrEmpty(itemCode) Then
+            sb.AppendLine("     AND ItemCode = @ItemCode")
+        End If
+
+        sb.AppendLine(" ORDER BY ItemCode, DocDate DESC, DocNo DESC, AccNo;")
+
+        Dim sql As String = sb.ToString()
+
+        Using sqlconn As New SqlConnection(dbSetting.ConnectionString)
+            Using cmd As New SqlCommand(sql, sqlconn)
+                Using da As New SqlDataAdapter(cmd)
+                    If Not String.IsNullOrEmpty(itemCode) Then
+                        cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+                    End If
+
+                    da.Fill(dt)
+                End Using
+            End Using
+        End Using
+
+        Return dt
+    End Function
+    Private Function LoadSalesPriceHistoryORI(dbSetting As DBSetting, itemCode As String) As DataTable
+        Dim dt As New DataTable()
+        Dim sb As New StringBuilder()
+
+        Dim docTypes() As String = {"SO", "DO", "IV", "CS", "CN", "DN"}
+        Dim docTypeDocStatus As New HashSet(Of String) From {"SO", "DO", "IV", "CN", "DN"}
+
+        sb.AppendLine(";WITH AllDocs AS (")
+
+        For i As Integer = 0 To docTypes.Length - 1
+            Dim docType = docTypes(i)
+            If i > 0 Then sb.AppendLine("UNION ALL")
+
+            Dim header = docType
+            Dim detail = docType & "DTL"
+            Dim hasStatus = docTypeDocStatus.Contains(docType)
+
+            sb.AppendLine($"
+            SELECT A.DocKey,
+                   A.DebtorCode AS AccNo,
+                   A.DebtorName AS CompanyName,
+                   A.DocNo,
+                   '{docType}' AS DocType,
+                   A.DocDate,
+                   A.BranchCode,
+                   B.ItemCode,
+                   B.Description,
+                   B.Desc2,
+                   ISNULL(B.BatchNo, '') AS BatchNo,
+                   B.UOM,
+                   g.CurrencyCode,
+                   B.Location,
+                   B.Qty,
+                   B.UnitPrice,
+                   B.SubTotal,
+                   D.AreaCode,
+                   A.LastModified,
+                   A.CreatedTimeStamp
+              FROM {header} A
+              INNER JOIN {detail} B ON A.DocKey = B.DocKey
+              INNER JOIN Debtor D ON A.DebtorCode = D.AccNo
+              LEFT JOIN GLMast g ON g.AccNo = A.DebtorCode
+              {(If(hasStatus, "WHERE A.DocStatus IN ('A','V')", ""))}")
+        Next
+
+        sb.AppendLine("),")
+        sb.AppendLine("Ranked AS (")
+        sb.AppendLine("    SELECT *,")
+        sb.AppendLine("           ROW_NUMBER() OVER (")
+        sb.AppendLine("               PARTITION BY ItemCode")
+        sb.AppendLine("               ORDER BY DocDate DESC, DocKey DESC")
+        sb.AppendLine("           ) AS rn")
+        sb.AppendLine("      FROM AllDocs")
+        sb.AppendLine(")")
+        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode,")
+        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+        sb.AppendLine("  FROM Ranked")
+        sb.AppendLine(" WHERE rn <= 5")
+        If Not String.IsNullOrEmpty(itemCode) Then
+            sb.AppendLine("     AND ItemCode = @ItemCode")
+        End If
+        sb.AppendLine(" ORDER BY ItemCode, DocDate DESC, DocNo DESC, AccNo;")
+
+        Dim sql As String = sb.ToString()
+
+        Using sqlconn As New SqlConnection(dbSetting.ConnectionString)
+            Using cmd As New SqlCommand(sql, sqlconn)
+                Using da As New SqlDataAdapter(cmd)
+                    If Not String.IsNullOrEmpty(itemCode) Then
+                        cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+                    End If
+
+                    da.Fill(dt)
+                End Using
+            End Using
+        End Using
+
+        Return dt
+    End Function
+#End Region
+
+    '#Region "<--- add sales/purchase price history tab --->"
+    '    Public Sub AddCustomTabs(form As XtraForm, userSession As UserSession, dbSetting As DBSetting)
+    '        AttachEntryGridEvents(form, userSession, dbSetting)
+    '        AttachRibbonClick(form, userSession, dbSetting)
+    '    End Sub
+
+    '    Private Sub AttachEntryGridEvents(form As XtraForm, userSession As UserSession, dbSetting As DBSetting)
+    '        Dim entryGrid = GetAllControls(form) _
+    '        .OfType(Of DevExpress.XtraGrid.GridControl)() _
+    '        .FirstOrDefault(Function(g) g.Name = "gridControlDetail")
+
+    '        Dim entryView = TryCast(entryGrid?.MainView, DevExpress.XtraGrid.Views.Grid.GridView)
+    '        If entryView IsNot Nothing Then
+    '            AddHandler entryView.FocusedRowChanged,
+    '            Sub(s, args)
+    '                UpdateSalesPriceHistoryGrid(form, userSession, dbSetting, entryView)
+    '                UpdatePurchasePriceHistoryGrid(form, userSession, dbSetting, entryView)
+    '            End Sub
+
+    '            AddHandler entryView.CellValueChanged,
+    '            Sub(s, args)
+    '                If args.Column.FieldName = "ItemCode" Then
+    '                    UpdateSalesPriceHistoryGrid(form, userSession, dbSetting, entryView)
+    '                    UpdatePurchasePriceHistoryGrid(form, userSession, dbSetting, entryView)
+    '                End If
+    '            End Sub
+    '        End If
+    '    End Sub
+    '    Private Sub UpdateSalesPriceHistoryGrid(form As XtraForm,
+    '                                            userSession As UserSession,
+    '                                            dbSetting As DBSetting,
+    '                                            entryView As DevExpress.XtraGrid.Views.Grid.GridView)
+
+    '        Dim handle = entryView.FocusedRowHandle
+    '        Dim itemCode = If(handle >= 0, TryCast(entryView.GetRowCellValue(handle, "ItemCode"), String), Nothing)
+
+    '        Dim history = LoadSalesPriceHistory(dbSetting, If(String.IsNullOrEmpty(itemCode), Nothing, itemCode))
+
+    '        Dim salesGrid = GetAllControls(form) _
+    '        .OfType(Of DevExpress.XtraGrid.GridControl)() _
+    '        .FirstOrDefault(Function(g) g.Name = "gctrSalesPriceHistory")
+
+    '        If salesGrid IsNot Nothing Then
+    '            salesGrid.DataSource = history
+    '        End If
+    '    End Sub
+    '    Private Sub UpdatePurchasePriceHistoryGrid(form As XtraForm,
+    '                                               userSession As UserSession,
+    '                                               dbSetting As DBSetting,
+    '                                               entryView As DevExpress.XtraGrid.Views.Grid.GridView)
+
+    '        Dim handle = entryView.FocusedRowHandle
+    '        Dim itemCode = If(handle >= 0, TryCast(entryView.GetRowCellValue(handle, "ItemCode"), String), Nothing)
+
+    '        Dim history = LoadPurchasePriceHistory(dbSetting, If(String.IsNullOrEmpty(itemCode), Nothing, itemCode))
+
+    '        Dim tabControl = GetTabControl(form)
+    '        If tabControl Is Nothing Then Return
+
+    '        ' Must check tab name manually because AutoCount reuses same names
+    '        Dim myTab = tabControl.TabPages.FirstOrDefault(Function(p) p.Name = "tabPurchasePriceHistory1")
+    '        If myTab Is Nothing Then Return
+
+    '        Dim purchaseGrid = myTab.Controls _
+    '        .OfType(Of DevExpress.XtraGrid.GridControl)() _
+    '        .FirstOrDefault(Function(g) g.Name = "gctrPurchasePriceHistory")
+
+    '        If purchaseGrid IsNot Nothing Then
+    '            purchaseGrid.DataSource = history
+    '        End If
+    '    End Sub
+
+    '    Public Sub AttachRibbonClick(form As XtraForm, userSession As UserSession, dbSetting As DBSetting)
+    '        ' Wait until the form is fully loaded
+    '        form.BeginInvoke(CType(Sub()
+    '                                   Dim ribbonForm = TryCast(form, DevExpress.XtraBars.Ribbon.RibbonForm)
+    '                                   If ribbonForm Is Nothing OrElse ribbonForm.Ribbon Is Nothing Then Return
+
+    '                                   Dim ribbonCtrl = ribbonForm.Ribbon
+    '                                   Dim barBtn = ribbonCtrl.Items _
+    '                                   .OfType(Of DevExpress.XtraBars.BarButtonItem)() _
+    '                                   .FirstOrDefault(Function(b) b.Name = "barBtnShowInstantInfo")
+    '                                   If barBtn Is Nothing Then Return
+
+    '                                   ' Attach only once
+    '                                   If Not Object.Equals(barBtn.Tag, "PriceHistoryHandlerAttached") Then
+    '                                       AddHandler barBtn.ItemClick,
+    '                                       Sub(sender As Object, args As DevExpress.XtraBars.ItemClickEventArgs)
+    '                                           Dim tabControl = GetTabControl(form)
+    '                                           If tabControl Is Nothing Then Return
+
+    '                                           CreateSalesPriceHistoryTab(tabControl, userSession, dbSetting)
+    '                                           CreatePurchasePriceHistoryTab(tabControl, userSession, dbSetting)
+
+    '                                           Dim entryGrid = GetAllControls(form) _
+    '                                                .OfType(Of DevExpress.XtraGrid.GridControl)() _
+    '                                                .FirstOrDefault(Function(g) g.Name = "gridControlDetail")
+
+    '                                           Dim entryView = TryCast(If(entryGrid IsNot Nothing, entryGrid.MainView, Nothing), DevExpress.XtraGrid.Views.Grid.GridView)
+    '                                           If entryView IsNot Nothing Then
+    '                                               UpdateSalesPriceHistoryGrid(form, userSession, dbSetting, entryView)
+    '                                               UpdatePurchasePriceHistoryGrid(form, userSession, dbSetting, entryView)
+    '                                           End If
+    '                                       End Sub
+    '                                       barBtn.Tag = "PriceHistoryHandlerAttached"
+    '                                   End If
+
+    '                               End Sub, MethodInvoker))
+    '    End Sub
+
+    '    Private Sub CreateSalesPriceHistoryTab(tabControl As DevExpress.XtraTab.XtraTabControl, session As UserSession, dbSetting As DBSetting)
+
+    '        If tabControl.TabPages.Cast(Of DevExpress.XtraTab.XtraTabPage)().Any(Function(p) p.Name = "tabSalesPriceHistory") Then Return
+
+    '        Dim salesTab As New DevExpress.XtraTab.XtraTabPage With {
+    '            .Name = "tabSalesPriceHistory",
+    '            .Text = "Sales Price History"
+    '        }
+
+    '        Dim grid As New DevExpress.XtraGrid.GridControl With {
+    '            .Dock = DockStyle.Fill,
+    '            .Name = "gctrSalesPriceHistory"
+    '        }
+
+    '        Dim view As New DevExpress.XtraGrid.Views.Grid.GridView(grid) With {
+    '            .Name = "gvSalesPriceHistory"
+    '        }
+    '        view.OptionsBehavior.Editable = False
+    '        view.OptionsView.ShowGroupPanel = False
+
+    '        grid.MainView = view
+    '        grid.ViewCollection.Add(view)
+
+    '        Dim dt = LoadSalesPriceHistory(dbSetting, Nothing)
+    '        Dim historyList = MapToPriceHistoryEntities(dt)
+    '        grid.DataSource = historyList
+
+    '        salesTab.Controls.Add(grid)
+    '        tabControl.TabPages.Add(salesTab)
+
+    '        salesTab.BeginInvoke(CType(Sub() PriceHistoryColumnProperties(grid), MethodInvoker))
+
+    '        AddHandler view.DoubleClick, Sub(sender2, e2) HandleSalesPriceHistoryDoubleClick(session, sender2)
+    '    End Sub
+    '    Private Function LoadSalesPriceHistory(dbSetting As DBSetting, itemCode As String) As DataTable
+    '        Dim dt As New DataTable()
+    '        Dim sb As New StringBuilder()
+
+    '        ' List of document types
+    '        Dim docTypes() As String = {"SO", "DO", "IV", "CS", "CN", "DN"}
+    '        Dim docTypeDocStatus As New HashSet(Of String) From {"SO", "DO", "IV", "CN", "DN"}
+
+    '        sb.AppendLine(";WITH AllDocs AS (")
+
+    '        ' Loop through each doc type to build the SELECT statements
+    '        For i As Integer = 0 To docTypes.Length - 1
+    '            Dim docType = docTypes(i)
+    '            If i > 0 Then sb.AppendLine("UNION ALL")
+
+    '            Dim header = docType
+    '            Dim detail = docType & "DTL"
+    '            Dim hasStatus = docTypeDocStatus.Contains(docType)
+
+    '            sb.AppendLine($"
+    '                SELECT
+    '                    A.DocKey,
+    '                    A.DebtorCode AS AccNo,
+    '                    A.DebtorName AS CompanyName,
+    '                    A.DocNo,
+    '                    '{docType}' AS DocType,
+    '                    A.DocDate,
+    '                    A.BranchCode,
+    '                    B.ItemCode,
+    '                    B.Description,
+    '                    B.Desc2,
+    '                    ISNULL(B.BatchNo, '') AS BatchNo,
+    '                    B.UOM,
+    '                    g.CurrencyCode,
+    '                    B.Location,
+    '                    B.Qty,
+    '                    B.UnitPrice,
+    '                    B.SubTotal,
+    '                    ISNULL(B.Discount,0) AS Discount,
+    '                    D.AreaCode,
+    '                    A.LastModified,
+    '                    A.CreatedTimeStamp
+    '                FROM {header} A
+    '                INNER JOIN {detail} B ON A.DocKey = B.DocKey
+    '                INNER JOIN Debtor D ON A.DebtorCode = D.AccNo
+    '                LEFT JOIN GLMast g ON g.AccNo = A.DebtorCode
+    '                WHERE {(If(hasStatus, "A.DocStatus IN ('A','V') AND ", ""))} 
+    '                      (@ItemCode IS NULL OR B.ItemCode = @ItemCode)")
+    '        Next
+
+    '        ' Add PastYearPriceHistory
+    '        sb.AppendLine("UNION ALL")
+    '        sb.AppendLine("
+    '            SELECT
+    '                A.DocKey,
+    '                A.AccNo,
+    '                C.CompanyName,
+    '                A.DocNo,
+    '                A.DocType,
+    '                A.DocDate,
+    '                A.BranchCode,
+    '                A.ItemCode,
+    '                B.Description,
+    '                B.Desc2,
+    '                ISNULL(A.BatchNo,'') AS BatchNo,
+    '                A.UOM,
+    '                g.CurrencyCode,
+    '                A.Location,
+    '                A.Qty,
+    '                A.UnitPrice,
+    '                A.SubTotal,
+    '                ISNULL(A.Discount,0) AS Discount,
+    '                C.AreaCode,
+    '                NULL AS LastModified,
+    '                NULL AS CreatedTimeStamp
+    '            FROM PastYearPriceHistory A
+    '            LEFT JOIN Item B ON B.ItemCode = A.ItemCode
+    '            LEFT JOIN Debtor C ON C.AccNo = A.AccNo
+    '            LEFT JOIN GLMast g ON g.AccNo = A.AccNo
+    '            WHERE (@ItemCode IS NULL OR A.ItemCode = @ItemCode)
+    '              AND A.DocType IN ('SO','DO','IV','CS','CN','DN')")
+
+    '        sb.AppendLine("),")
+    '        sb.AppendLine("Ranked AS (")
+    '        sb.AppendLine("    SELECT *,")
+    '        sb.AppendLine("           ROW_NUMBER() OVER (")
+    '        sb.AppendLine("               PARTITION BY ItemCode")
+    '        sb.AppendLine("               ORDER BY DocDate DESC,")
+    '        sb.AppendLine("                        CASE")
+    '        sb.AppendLine("                            WHEN DocType = 'DN' THEN 1")
+    '        sb.AppendLine("                            WHEN DocType = 'CN' THEN 1")
+    '        sb.AppendLine("                            WHEN DocType = 'CS' THEN 2")
+    '        sb.AppendLine("                            WHEN DocType = 'IV' THEN 2")
+    '        sb.AppendLine("                            WHEN DocType = 'DO' THEN 3")
+    '        sb.AppendLine("                            WHEN DocType = 'SO' THEN 4")
+    '        sb.AppendLine("                            ELSE 99")
+    '        sb.AppendLine("                        END,")
+    '        sb.AppendLine("                        DocKey DESC")
+    '        sb.AppendLine("           ) AS rn")
+    '        sb.AppendLine("      FROM AllDocs")
+    '        sb.AppendLine(")")
+    '        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+    '        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode, Discount,")
+    '        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+    '        sb.AppendLine("  FROM Ranked")
+    '        sb.AppendLine(" WHERE rn <= 5")
+    '        sb.AppendLine(" ORDER BY ItemCode,")
+    '        sb.AppendLine("          DocDate DESC,")
+    '        sb.AppendLine("          CASE")
+    '        sb.AppendLine("              WHEN DocType = 'DN' THEN 1")
+    '        sb.AppendLine("              WHEN DocType = 'CN' THEN 1")
+    '        sb.AppendLine("              WHEN DocType = 'CS' THEN 2")
+    '        sb.AppendLine("              WHEN DocType = 'IV' THEN 2")
+    '        sb.AppendLine("              WHEN DocType = 'DO' THEN 3")
+    '        sb.AppendLine("              WHEN DocType = 'SO' THEN 4")
+    '        sb.AppendLine("              ELSE 99")
+    '        sb.AppendLine("          END,")
+    '        sb.AppendLine("          DocKey DESC;")
+
+    '        Dim sql As String = sb.ToString()
+
+    '        Using sqlconn As New SqlConnection(dbSetting.ConnectionString)
+    '            Using cmd As New SqlCommand(sql, sqlconn)
+    '                Using da As New SqlDataAdapter(cmd)
+    '                    ' Pass parameter (NULL or item code)
+    '                    If String.IsNullOrEmpty(itemCode) Then
+    '                        cmd.Parameters.AddWithValue("@ItemCode", DBNull.Value)
+    '                    Else
+    '                        cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+    '                    End If
+
+    '                    da.Fill(dt)
+    '                End Using
+    '            End Using
+    '        End Using
+
+    '        Return dt
+    '    End Function
+    '    Private Sub HandleSalesPriceHistoryDoubleClick(session As UserSession, sender2 As Object)
+    '        Dim gv = TryCast(sender2, DevExpress.XtraGrid.Views.Grid.GridView)
+    '        If gv Is Nothing Then Return
+
+    '        Dim pt = gv.GridControl.PointToClient(Control.MousePosition)
+    '        Dim hitInfo = gv.CalcHitInfo(pt)
+    '        If Not (hitInfo.InRow OrElse hitInfo.InRowCell) Then Return
+
+    '        Dim docKeyObj = gv.GetRowCellValue(hitInfo.RowHandle, "DocKey")
+    '        Dim docType As String = Convert.ToString(gv.GetRowCellValue(hitInfo.RowHandle, "DocType"))
+
+    '        If docKeyObj Is Nothing OrElse String.IsNullOrEmpty(docType) Then Return
+
+    '        Dim docKey As Long = Convert.ToInt64(docKeyObj)
+
+    '        Select Case docType
+    '            Case "SO"
+    '                AutoCount.Invoicing.Sales.SalesOrder.FormSalesOrderCmd.ViewDocument(session, docKey)
+    '            Case "DO"
+    '                AutoCount.Invoicing.Sales.DeliveryOrder.FormDeliveryOrderCmd.ViewDocument(session, docKey)
+    '            Case "IV"
+    '                AutoCount.Invoicing.Sales.Invoice.FormInvoiceCmd.ViewDocument(session, docKey)
+    '            Case "CS"
+    '                AutoCount.Invoicing.Sales.CashSale.FormCashSaleCmd.ViewDocument(session, docKey)
+    '            Case "CN"
+    '                AutoCount.Invoicing.Sales.CreditNote.FormCreditNoteCmd.ViewDocument(session, docKey)
+    '            Case "DN"
+    '                AutoCount.Invoicing.Sales.DebitNote.FormDebitNoteCmd.ViewDocument(session, docKey)
+    '        End Select
+    '    End Sub
+
+    '    Private Sub CreatePurchasePriceHistoryTab(tabControl As DevExpress.XtraTab.XtraTabControl, session As UserSession, dbSetting As DBSetting)
+
+    '        ' Prevent duplicate tab creation
+    '        If tabControl.TabPages.Cast(Of DevExpress.XtraTab.XtraTabPage)().Any(Function(p) p.Name = "tabPurchasePriceHistory1") Then Return
+
+    '        ' Create new tab page
+    '        Dim purchaseTab As New DevExpress.XtraTab.XtraTabPage With {
+    '            .Name = "tabPurchasePriceHistory1",
+    '            .Text = "Purchase Price History"
+    '        }
+
+    '        ' Create grid control
+    '        Dim grid As New DevExpress.XtraGrid.GridControl With {
+    '            .Dock = DockStyle.Fill,
+    '            .Name = "gctrPurchasePriceHistory"
+    '        }
+
+    '        ' Create grid view
+    '        Dim view As New DevExpress.XtraGrid.Views.Grid.GridView(grid) With {
+    '            .Name = "gvPurchasePriceHistory"
+    '        }
+    '        view.OptionsBehavior.Editable = False
+    '        view.OptionsView.ShowGroupPanel = False
+
+    '        grid.MainView = view
+    '        grid.ViewCollection.Add(view)
+
+    '        ' Load data and bind
+    '        Dim dt = LoadPurchasePriceHistory(dbSetting, Nothing)
+    '        Dim historyList = MapToPriceHistoryEntities(dt)
+    '        grid.DataSource = historyList
+
+    '        purchaseTab.Controls.Add(grid)
+    '        tabControl.TabPages.Add(purchaseTab)
+
+    '        ' Apply column properties after rendering
+    '        purchaseTab.BeginInvoke(DirectCast(Sub()
+    '                                               PriceHistoryColumnProperties(grid)
+    '                                           End Sub, MethodInvoker))
+
+    '        ' Handle double-click
+    '        AddHandler view.DoubleClick, Sub(sender2, e2) HandlePurchasePriceHistoryDoubleClick(session, sender2)
+    '    End Sub
+    '    Private Function LoadPurchasePriceHistory(dbSetting As DBSetting, itemCode As String) As DataTable
+    '        Dim dt As New DataTable()
+    '        Dim sb As New StringBuilder()
+
+    '        Dim docTypes As String() = {"PO", "GR", "PI"} ' You can add more document types here
+    '        Dim isFirst As Boolean = True
+
+    '        sb.AppendLine(";WITH AllDocs AS (")
+
+    '        For Each docType In docTypes
+    '            If Not isFirst Then sb.AppendLine("UNION ALL")
+    '            isFirst = False
+
+    '            ' Determine table names
+    '            Dim headerTable As String = docType
+    '            Dim detailTable As String = docType & "DTL"
+
+    '            sb.AppendLine($"
+    '                SELECT
+    '                    A.DocKey,
+    '                    A.CreditorCode AS AccNo,
+    '                    C.CompanyName,
+    '                    A.DocNo,
+    '                    '{docType}' AS DocType,
+    '                    A.DocDate,
+    '                    A.BranchCode,
+    '                    B.ItemCode,
+    '                    B.Description,
+    '                    B.Desc2,
+    '                    ISNULL(B.BatchNo,'') AS BatchNo,
+    '                    B.UOM,
+    '                    g.CurrencyCode,
+    '                    B.Location,
+    '                    B.Qty,
+    '                    B.UnitPrice,
+    '                    B.SubTotal,
+    '                    B.Discount,
+    '                    C.AreaCode,
+    '                    A.LastModified,
+    '                    A.CreatedTimeStamp
+    '                FROM {headerTable} A
+    '                INNER JOIN {detailTable} B ON A.DocKey = B.DocKey
+    '                INNER JOIN Creditor C ON A.CreditorCode = C.AccNo
+    '                LEFT JOIN GLMast g ON g.AccNo = A.CreditorCode
+    '                WHERE (@ItemCode IS NULL OR B.ItemCode = @ItemCode)")
+    '        Next
+
+    '        ' Add PastYearPriceHistory separately
+    '        sb.AppendLine("UNION ALL
+    '            SELECT
+    '                A.DocKey,
+    '                A.AccNo,
+    '                C.CompanyName,
+    '                A.DocNo,
+    '                A.DocType,
+    '                A.DocDate,
+    '                A.BranchCode,
+    '                A.ItemCode,
+    '                B.Description,
+    '                B.Desc2,
+    '                ISNULL(A.BatchNo,'') AS BatchNo,
+    '                A.UOM,
+    '                g.CurrencyCode,
+    '                A.Location,
+    '                A.Qty,
+    '                A.UnitPrice,
+    '                A.SubTotal,
+    '                A.Discount,
+    '                C.AreaCode,
+    '                NULL AS LastModified,
+    '                NULL AS CreatedTimeStamp
+    '            FROM PastYearPriceHistory A
+    '            LEFT JOIN Item B ON B.ItemCode = A.ItemCode
+    '            LEFT JOIN Creditor C ON C.AccNo = A.AccNo
+    '            LEFT JOIN GLMast g ON g.AccNo = A.AccNo
+    '            WHERE (@ItemCode IS NULL OR A.ItemCode = @ItemCode)
+    '              AND A.DocType IN ('PO','GR','PI')")
+
+    '        sb.AppendLine("),")
+    '        sb.AppendLine("Ranked AS (")
+    '        sb.AppendLine("    SELECT *,")
+    '        sb.AppendLine("           ROW_NUMBER() OVER (")
+    '        sb.AppendLine("               PARTITION BY ItemCode")
+    '        sb.AppendLine("               ORDER BY DocDate DESC,")
+    '        sb.AppendLine("                        CASE DocType WHEN 'PI' THEN 1 WHEN 'GR' THEN 2 WHEN 'PO' THEN 3 ELSE 99 END,")
+    '        sb.AppendLine("                        DocKey DESC")
+    '        sb.AppendLine("           ) AS rn")
+    '        sb.AppendLine("    FROM AllDocs")
+    '        sb.AppendLine(")")
+    '        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+    '        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode, Discount,")
+    '        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+    '        sb.AppendLine("FROM Ranked")
+    '        sb.AppendLine("WHERE rn <= 5")
+    '        sb.AppendLine("ORDER BY ItemCode, DocDate DESC,")
+    '        sb.AppendLine("         CASE DocType WHEN 'PI' THEN 1 WHEN 'GR' THEN 2 WHEN 'PO' THEN 3 ELSE 99 END,")
+    '        sb.AppendLine("         DocKey DESC;")
+
+    '        Dim sql As String = sb.ToString()
+
+    '        Using sqlconn As New SqlConnection(dbSetting.ConnectionString)
+    '            Using cmd As New SqlCommand(sql, sqlconn)
+    '                ' Add @ItemCode parameter safely
+    '                If String.IsNullOrEmpty(itemCode) Then
+    '                    cmd.Parameters.AddWithValue("@ItemCode", DBNull.Value)
+    '                Else
+    '                    cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+    '                End If
+
+    '                Using da As New SqlDataAdapter(cmd)
+    '                    da.Fill(dt)
+    '                End Using
+    '            End Using
+    '        End Using
+
+    '        Return dt
+    '    End Function
+    '    Private Sub HandlePurchasePriceHistoryDoubleClick(session As UserSession, sender2 As Object)
+    '        Dim gv = TryCast(sender2, DevExpress.XtraGrid.Views.Grid.GridView)
+    '        If gv Is Nothing Then Return
+
+    '        Dim pt = gv.GridControl.PointToClient(Control.MousePosition)
+    '        Dim hitInfo = gv.CalcHitInfo(pt)
+    '        If Not (hitInfo.InRow OrElse hitInfo.InRowCell) Then Return
+
+    '        Dim docKeyObj = gv.GetRowCellValue(hitInfo.RowHandle, "DocKey")
+    '        Dim docType = TryCast(gv.GetRowCellValue(hitInfo.RowHandle, "DocType"), String)
+    '        If docKeyObj Is Nothing OrElse String.IsNullOrEmpty(docType) Then Return
+
+    '        Dim docKey As Long = Convert.ToInt64(docKeyObj)
+
+    '        Select Case docType
+    '            Case "PO"
+    '                AutoCount.Invoicing.Purchase.PurchaseOrder.FormPurchaseOrderCmd.ViewDocument(session, docKey)
+    '            Case "GR"
+    '                AutoCount.Invoicing.Purchase.GoodsReceivedNote.FormGoodsReceivedNoteCmd.ViewDocument(session, docKey)
+    '            Case "PI"
+    '                AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceCmd.ViewDocument(session, docKey)
+    '        End Select
+    '    End Sub
+
+    '    Public Shared Function MapToPriceHistoryEntities(dt As DataTable) As List(Of PriceHistoryEntity)
+    '        Dim list As New List(Of PriceHistoryEntity)()
+    '        For Each row As DataRow In dt.Rows
+    '            Dim entity As New PriceHistoryEntity With {
+    '            .DocKey = If(row("DocKey") IsNot DBNull.Value, Convert.ToInt64(row("DocKey")), 0),
+    '            .DocNo = TryCast(row("DocNo"), String),
+    '            .DocType = TryCast(row("DocType"), String),
+    '            .DocDate = If(row("DocDate") IsNot DBNull.Value, Convert.ToDateTime(row("DocDate")), DateTime.MinValue),
+    '            .BranchCode = TryCast(row("BranchCode"), String),
+    '            .AreaCode = TryCast(row("AreaCode"), String),
+    '            .LastModified = If(row("LastModified") IsNot DBNull.Value, Convert.ToDateTime(row("LastModified")), DateTime.MinValue),
+    '            .CreatedTimeStamp = If(row("CreatedTimeStamp") IsNot DBNull.Value, Convert.ToDateTime(row("CreatedTimeStamp")), DateTime.MinValue),
+    '            .AccNo = TryCast(row("AccNo"), String),
+    '            .CompanyName = TryCast(row("CompanyName"), String),
+    '            .ItemCode = TryCast(row("ItemCode"), String),
+    '            .Description = TryCast(row("Description"), String),
+    '            .Desc2 = TryCast(row("Desc2"), String),
+    '            .BatchNo = TryCast(row("BatchNo"), String),
+    '            .UOM = TryCast(row("UOM"), String),
+    '            .Location = TryCast(row("Location"), String),
+    '            .Qty = If(row("Qty") IsNot DBNull.Value, Convert.ToDecimal(row("Qty")), 0D),
+    '            .UnitPrice = If(row("UnitPrice") IsNot DBNull.Value, Convert.ToDecimal(row("UnitPrice")), 0D),
+    '            .SubTotal = If(row("SubTotal") IsNot DBNull.Value, Convert.ToDecimal(row("SubTotal")), 0D),
+    '            .Discount = TryCast(row("Discount"), String),
+    '            .CurrencyCode = TryCast(row("CurrencyCode"), String)
+    '        }
+    '            list.Add(entity)
+    '        Next
+    '        Return list
+    '    End Function
+    '    Private Sub PriceHistoryColumnProperties(grid As DevExpress.XtraGrid.GridControl)
+    '        Dim gv = TryCast(grid.MainView, DevExpress.XtraGrid.Views.Grid.GridView)
+    '        If gv Is Nothing Then Return
+
+    '        gv.PopulateColumns()
+
+    '        SetColumn(gv, NameOf(PriceHistoryEntity.DocKey), False, True)
+    '        SetColumn(gv, NameOf(PriceHistoryEntity.Desc2), False, True)
+    '        SetColumn(gv, NameOf(PriceHistoryEntity.BranchCode), False, True)
+    '        SetColumn(gv, NameOf(PriceHistoryEntity.AreaCode), False, True)
+    '        SetColumn(gv, NameOf(PriceHistoryEntity.CurrencyCode), False, True)
+    '        SetColumn(gv, NameOf(PriceHistoryEntity.DocDate), True, True, "dd/MM/yyyy")
+    '        SetColumn(gv, NameOf(PriceHistoryEntity.CreatedTimeStamp), False, True, "dd/MM/yyyy HH:mm:ss")
+    '        SetColumn(gv, NameOf(PriceHistoryEntity.LastModified), False, True, "dd/MM/yyyy HH:mm:ss")
+    '    End Sub
+    '    Private Sub SetColumn(gv As DevExpress.XtraGrid.Views.Grid.GridView, fieldName As String, visible As Boolean, showInCustomizationForm As Boolean, Optional format As String = Nothing)
+    '        Dim col = gv.Columns.ColumnByFieldName(fieldName)
+    '        If col Is Nothing Then Return
+
+    '        col.Visible = visible
+    '        col.OptionsColumn.ShowInCustomizationForm = showInCustomizationForm
+
+    '        If Not String.IsNullOrEmpty(format) Then
+    '            col.DisplayFormat.FormatType = DevExpress.Utils.FormatType.DateTime
+    '            col.DisplayFormat.FormatString = format
+    '        End If
+    '    End Sub
+
+
+    '    Private Function LoadSalesPriceHistoryV2(dbSetting As DBSetting, itemCode As String) As DataTable
+    '        Dim dt As New DataTable()
+    '        Dim sb As New StringBuilder()
+
+    '        Dim docTypes() As String = {"SO", "DO", "IV", "CS", "CN", "DN"}
+    '        Dim docTypeDocStatus As New HashSet(Of String) From {"SO", "DO", "IV", "CN", "DN"}
+
+    '        sb.AppendLine(";WITH AllDocs AS (")
+
+    '        For i As Integer = 0 To docTypes.Length - 1
+    '            Dim docType = docTypes(i)
+    '            If i > 0 Then sb.AppendLine("UNION ALL")
+
+    '            Dim header = docType
+    '            Dim detail = docType & "DTL"
+    '            Dim hasStatus = docTypeDocStatus.Contains(docType)
+
+    '            ' Note the TOP 100 and dynamic filter inside WHERE
+    '            sb.AppendLine($"
+    '                SELECT
+    '                       A.DocKey,
+    '                       A.DebtorCode AS AccNo,
+    '                       A.DebtorName AS CompanyName,
+    '                       A.DocNo,
+    '                       '{docType}' AS DocType,
+    '                       A.DocDate,
+    '                       A.BranchCode,
+    '                       B.ItemCode,
+    '                       B.Description,
+    '                       B.Desc2,
+    '                       ISNULL(B.BatchNo, '') AS BatchNo,
+    '                       B.UOM,
+    '                       g.CurrencyCode,
+    '                       B.Location,
+    '                       B.Qty,
+    '                       B.UnitPrice,
+    '                       B.SubTotal,
+    '                       D.AreaCode,
+    '                       A.LastModified,
+    '                       A.CreatedTimeStamp
+    '                  FROM {header} A
+    '                  INNER JOIN {detail} B ON A.DocKey = B.DocKey
+    '                  INNER JOIN Debtor D ON A.DebtorCode = D.AccNo
+    '                  LEFT JOIN GLMast g ON g.AccNo = A.DebtorCode
+    '                  WHERE {(If(hasStatus, "A.DocStatus IN ('A','V') AND ", ""))} 
+    '                        (@ItemCode IS NULL OR B.ItemCode = @ItemCode)")
+    '        Next
+
+    '        sb.AppendLine("),")
+    '        sb.AppendLine("Ranked AS (")
+    '        sb.AppendLine("    SELECT *,")
+    '        sb.AppendLine("           ROW_NUMBER() OVER (")
+    '        sb.AppendLine("               PARTITION BY ItemCode")
+    '        sb.AppendLine("               ORDER BY DocDate DESC, DocKey DESC")
+    '        sb.AppendLine("           ) AS rn")
+    '        sb.AppendLine("      FROM AllDocs")
+    '        sb.AppendLine(")")
+    '        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+    '        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode,")
+    '        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+    '        sb.AppendLine("  FROM Ranked")
+    '        sb.AppendLine(" WHERE rn <= 5")
+    '        sb.AppendLine(" ORDER BY ItemCode, DocDate DESC, DocNo DESC, AccNo;")
+
+    '        Dim sql As String = sb.ToString()
+
+    '        Using sqlconn As New SqlConnection(dbSetting.ConnectionString)
+    '            Using cmd As New SqlCommand(sql, sqlconn)
+    '                Using da As New SqlDataAdapter(cmd)
+    '                    ' Pass parameter (NULL or item code)
+    '                    If String.IsNullOrEmpty(itemCode) Then
+    '                        cmd.Parameters.AddWithValue("@ItemCode", DBNull.Value)
+    '                    Else
+    '                        cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+    '                    End If
+
+    '                    da.Fill(dt)
+    '                End Using
+    '            End Using
+    '        End Using
+
+    '        Return dt
+    '    End Function
+    '    Private Function LoadPurchasePriceHistoryV2(dbSetting As DBSetting, itemCode As String) As DataTable
+    '        Dim dt As New DataTable()
+    '        Dim sb As New StringBuilder()
+
+    '        Dim docTypes() As String = {"PO", "GR", "PI"}
+
+    '        sb.AppendLine(";WITH AllDocs AS (")
+
+    '        For i As Integer = 0 To docTypes.Length - 1
+    '            Dim docType = docTypes(i)
+    '            If i > 0 Then sb.AppendLine("UNION ALL")
+
+    '            Dim header = docType
+    '            Dim detail = docType & "DTL"
+
+    '            sb.AppendLine($"
+    '                SELECT
+    '                    A.DocKey,
+    '                    A.CreditorCode AS AccNo,
+    '                    A.CreditorName AS CompanyName,
+    '                    A.DocNo,
+    '                    '{docType}' AS DocType,
+    '                    A.DocDate,
+    '                    A.BranchCode,
+    '                    B.ItemCode,
+    '                    B.Description,
+    '                    B.Desc2,
+    '                    ISNULL(B.BatchNo, '') AS BatchNo,
+    '                    B.UOM,
+    '                    g.CurrencyCode,
+    '                    B.Location,
+    '                    B.Qty,
+    '                    B.UnitPrice,
+    '                    B.SubTotal,
+    '                    C.AreaCode,
+    '                    A.LastModified,
+    '                    A.CreatedTimeStamp
+    '                FROM {header} A
+    '                INNER JOIN {detail} B ON A.DocKey = B.DocKey
+    '                INNER JOIN Creditor C ON A.CreditorCode = C.AccNo
+    '                LEFT JOIN GLMast g ON g.AccNo = A.CreditorCode
+    '                WHERE (@ItemCode IS NULL OR B.ItemCode = @ItemCode)")
+    '        Next
+
+    '        sb.AppendLine("),")
+    '        sb.AppendLine("Ranked AS (")
+    '        sb.AppendLine("    SELECT *,")
+    '        sb.AppendLine("           ROW_NUMBER() OVER (")
+    '        sb.AppendLine("               PARTITION BY ItemCode")
+    '        sb.AppendLine("               ORDER BY DocDate DESC, DocKey DESC")
+    '        sb.AppendLine("           ) AS rn")
+    '        sb.AppendLine("    FROM AllDocs")
+    '        sb.AppendLine(")")
+    '        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+    '        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode,")
+    '        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+    '        sb.AppendLine("  FROM Ranked")
+    '        sb.AppendLine(" WHERE rn <= 5")
+    '        sb.AppendLine(" ORDER BY ItemCode, DocDate DESC, DocNo DESC, AccNo;")
+
+    '        Dim sql As String = sb.ToString()
+
+    '        Using sqlconn As New SqlConnection(dbSetting.ConnectionString)
+    '            Using cmd As New SqlCommand(sql, sqlconn)
+    '                Using da As New SqlDataAdapter(cmd)
+    '                    ' Add @ItemCode parameter safely
+    '                    If String.IsNullOrEmpty(itemCode) Then
+    '                        cmd.Parameters.AddWithValue("@ItemCode", DBNull.Value)
+    '                    Else
+    '                        cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+    '                    End If
+
+    '                    da.Fill(dt)
+    '                End Using
+    '            End Using
+    '        End Using
+
+    '        Return dt
+    '    End Function
+    '    Private Function LoadPurchasePriceHistoryORI(dbSetting As DBSetting, itemCode As String) As DataTable
+    '        Dim dt As New DataTable()
+    '        Dim sb As New StringBuilder()
+
+    '        Dim docTypes() As String = {"PO", "GR", "PI"}
+
+    '        sb.AppendLine(";WITH AllDocs AS (")
+
+    '        For i As Integer = 0 To docTypes.Length - 1
+    '            Dim docType = docTypes(i)
+    '            If i > 0 Then sb.AppendLine("UNION ALL")
+
+    '            Dim header = docType
+    '            Dim detail = docType & "DTL"
+
+    '            sb.AppendLine($"
+    '            SELECT 
+    '                A.DocKey,
+    '                A.CreditorCode AS AccNo,
+    '                A.CreditorName AS CompanyName,
+    '                A.DocNo,
+    '                '{docType}' AS DocType,
+    '                A.DocDate,
+    '                A.BranchCode,
+    '                B.ItemCode,
+    '                B.Description,
+    '                B.Desc2,
+    '                ISNULL(B.BatchNo, '') AS BatchNo,
+    '                B.UOM,
+    '                g.CurrencyCode,
+    '                B.Location,
+    '                B.Qty,
+    '                B.UnitPrice,
+    '                B.SubTotal,
+    '                C.AreaCode,
+    '                A.LastModified,
+    '                A.CreatedTimeStamp
+    '            FROM {header} A
+    '            INNER JOIN {detail} B ON A.DocKey = B.DocKey
+    '            INNER JOIN Creditor C ON A.CreditorCode = C.AccNo
+    '            LEFT JOIN GLMast g ON g.AccNo = A.CreditorCode")
+    '        Next
+
+    '        sb.AppendLine("),")
+    '        sb.AppendLine("Ranked AS (")
+    '        sb.AppendLine("    SELECT *,")
+    '        sb.AppendLine("           ROW_NUMBER() OVER (")
+    '        sb.AppendLine("               PARTITION BY ItemCode")
+    '        sb.AppendLine("               ORDER BY DocDate DESC, DocKey DESC")
+    '        sb.AppendLine("           ) AS rn")
+    '        sb.AppendLine("    FROM AllDocs")
+    '        sb.AppendLine(")")
+    '        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+    '        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode,")
+    '        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+    '        sb.AppendLine("  FROM Ranked")
+    '        sb.AppendLine(" WHERE rn <= 5")
+
+    '        If Not String.IsNullOrEmpty(itemCode) Then
+    '            sb.AppendLine("     AND ItemCode = @ItemCode")
+    '        End If
+
+    '        sb.AppendLine(" ORDER BY ItemCode, DocDate DESC, DocNo DESC, AccNo;")
+
+    '        Dim sql As String = sb.ToString()
+
+    '        Using sqlconn As New SqlConnection(dbSetting.ConnectionString)
+    '            Using cmd As New SqlCommand(sql, sqlconn)
+    '                Using da As New SqlDataAdapter(cmd)
+    '                    If Not String.IsNullOrEmpty(itemCode) Then
+    '                        cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+    '                    End If
+
+    '                    da.Fill(dt)
+    '                End Using
+    '            End Using
+    '        End Using
+
+    '        Return dt
+    '    End Function
+    '    Private Function LoadSalesPriceHistoryORI(dbSetting As DBSetting, itemCode As String) As DataTable
+    '        Dim dt As New DataTable()
+    '        Dim sb As New StringBuilder()
+
+    '        Dim docTypes() As String = {"SO", "DO", "IV", "CS", "CN", "DN"}
+    '        Dim docTypeDocStatus As New HashSet(Of String) From {"SO", "DO", "IV", "CN", "DN"}
+
+    '        sb.AppendLine(";WITH AllDocs AS (")
+
+    '        For i As Integer = 0 To docTypes.Length - 1
+    '            Dim docType = docTypes(i)
+    '            If i > 0 Then sb.AppendLine("UNION ALL")
+
+    '            Dim header = docType
+    '            Dim detail = docType & "DTL"
+    '            Dim hasStatus = docTypeDocStatus.Contains(docType)
+
+    '            sb.AppendLine($"
+    '            SELECT A.DocKey,
+    '                   A.DebtorCode AS AccNo,
+    '                   A.DebtorName AS CompanyName,
+    '                   A.DocNo,
+    '                   '{docType}' AS DocType,
+    '                   A.DocDate,
+    '                   A.BranchCode,
+    '                   B.ItemCode,
+    '                   B.Description,
+    '                   B.Desc2,
+    '                   ISNULL(B.BatchNo, '') AS BatchNo,
+    '                   B.UOM,
+    '                   g.CurrencyCode,
+    '                   B.Location,
+    '                   B.Qty,
+    '                   B.UnitPrice,
+    '                   B.SubTotal,
+    '                   D.AreaCode,
+    '                   A.LastModified,
+    '                   A.CreatedTimeStamp
+    '              FROM {header} A
+    '              INNER JOIN {detail} B ON A.DocKey = B.DocKey
+    '              INNER JOIN Debtor D ON A.DebtorCode = D.AccNo
+    '              LEFT JOIN GLMast g ON g.AccNo = A.DebtorCode
+    '              {(If(hasStatus, "WHERE A.DocStatus IN ('A','V')", ""))}")
+    '        Next
+
+    '        sb.AppendLine("),")
+    '        sb.AppendLine("Ranked AS (")
+    '        sb.AppendLine("    SELECT *,")
+    '        sb.AppendLine("           ROW_NUMBER() OVER (")
+    '        sb.AppendLine("               PARTITION BY ItemCode")
+    '        sb.AppendLine("               ORDER BY DocDate DESC, DocKey DESC")
+    '        sb.AppendLine("           ) AS rn")
+    '        sb.AppendLine("      FROM AllDocs")
+    '        sb.AppendLine(")")
+    '        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+    '        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode,")
+    '        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+    '        sb.AppendLine("  FROM Ranked")
+    '        sb.AppendLine(" WHERE rn <= 5")
+    '        If Not String.IsNullOrEmpty(itemCode) Then
+    '            sb.AppendLine("     AND ItemCode = @ItemCode")
+    '        End If
+    '        sb.AppendLine(" ORDER BY ItemCode, DocDate DESC, DocNo DESC, AccNo;")
+
+    '        Dim sql As String = sb.ToString()
+
+    '        Using sqlconn As New SqlConnection(dbSetting.ConnectionString)
+    '            Using cmd As New SqlCommand(sql, sqlconn)
+    '                Using da As New SqlDataAdapter(cmd)
+    '                    If Not String.IsNullOrEmpty(itemCode) Then
+    '                        cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+    '                    End If
+
+    '                    da.Fill(dt)
+    '                End Using
+    '            End Using
+    '        End Using
+
+    '        Return dt
+    '    End Function
+    '#End Region
+End Class
+
+'<--- original code --->
+'Public Class PurchaseInvoiceController
+'    Private Iterator Function GetAllControls1(parent As Control) As IEnumerable(Of Control)
+'        For Each control As Control In parent.Controls
+'            Yield control
+
+'            For Each child As Control In GetAllControls1(control)
+'                Yield child
+'            Next
+'        Next
+'    End Function
+
+'#Region "<--- add stock item maintenance button --->"
+'    Public Sub AddStockItemMaintenanceRibbon(e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormShowEventArgs)
+'        Dim ribbonCtrl = e.Form.Ribbon
+
+'        ' Check for existing group
+'        Dim newGroup = ribbonCtrl.Pages("Home").Groups _
+'                    .FirstOrDefault(Function(g) g.Name = "ribbonPageGroupStockItemMaintenance")
+
+'        If newGroup Is Nothing Then
+'            ' Create the group if it does not exist
+'            newGroup = New DevExpress.XtraBars.Ribbon.RibbonPageGroup("Stock Item") With {
+'            .Name = "ribbonPageGroupStockItemMaintenance"
+'        }
+'            ribbonCtrl.Pages("Home").Groups.Add(newGroup)
+'        End If
+
+'        ' Check for existing button
+'        Dim btnStockItemMaintenance = ribbonCtrl.Items _
+'                                  .OfType(Of DevExpress.XtraBars.BarButtonItem)() _
+'                                  .FirstOrDefault(Function(b) b.Name = "btnStockItemMaintenance")
+
+'        AddHandler btnStockItemMaintenance.ItemClick, Sub(s, args) OpenStockItemMaintenance(e)
+
+'        newGroup.Visible = (e.EditWindowMode <> AutoCount.Document.EditWindowMode.View)
+'    End Sub
+
+'    Private Sub OpenStockItemMaintenance(e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormEventArgs)
+'        Dim grid = e.GridControl
+'        Dim view = TryCast(grid.MainView, GridView)
+
+'        If view Is Nothing OrElse view.FocusedRowHandle < 0 Then Return
+
+'        Dim itemCode As String = Convert.ToString(view.GetRowCellValue(view.FocusedRowHandle, "ItemCode"))
+'        If String.IsNullOrEmpty(itemCode) Then Return
+
+'        Try
+'            Dim session = e.UserSession
+'            Dim dbSetting = e.DBSetting
+
+'            Dim itemEntity = AutoCount.Stock.Item.ItemDataAccess _
+'                        .Create(session, dbSetting) _
+'                        .LoadItem(itemCode, AutoCount.Stock.Item.ItemEntryAction.View)
+
+'            If itemEntity Is Nothing Then
+'                XtraMessageBox.Show("Item Not Found", "Autosoft Solution", MessageBoxButtons.OK, MessageBoxIcon.[Error])
+'                Return
+'            End If
+
+'            Dim threadform As New ThreadForm(GetType(AutoCount.Stock.Item.FormStockItem).AssemblyQualifiedName,
+'                                         New Type() {itemEntity.GetType(), dbSetting.GetType()},
+'                                         New Object() {itemEntity, dbSetting})
+'            threadform.Show()
+'        Catch ex As Exception
+'            XtraMessageBox.Show(ex.Message, "Autosoft Solution", MessageBoxButtons.OK, MessageBoxIcon.[Error])
+'        End Try
+'    End Sub
+
+'#End Region
+
+'#Region "<--- add sales/purchase price history tab --->"
+'    Public Sub AddCustomTabs(e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormShowEventArgs)
+'        AttachEntryGridEvents(e)
+'        AttachRibbonClick(e)
+'    End Sub
+
+'    Private Sub AttachEntryGridEvents(e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormShowEventArgs)
+'        Dim entryGrid = GetAllControls1(e.Form) _
+'        .OfType(Of DevExpress.XtraGrid.GridControl)() _
+'        .FirstOrDefault(Function(g) g.Name = "gridControlDetail")
+
+'        Dim entryView = TryCast(entryGrid?.MainView, DevExpress.XtraGrid.Views.Grid.GridView)
+'        If entryView IsNot Nothing Then
+'            AddHandler entryView.FocusedRowChanged,
+'            Sub(s, args)
+'                UpdateSalesPriceHistoryGrid(e, entryView)
+'                UpdatePurchasePriceHistoryGrid(e, entryView)
+'            End Sub
+
+'            AddHandler entryView.CellValueChanged,
+'            Sub(s, args)
+'                If args.Column.FieldName = "ItemCode" Then
+'                    UpdateSalesPriceHistoryGrid(e, entryView)
+'                    UpdatePurchasePriceHistoryGrid(e, entryView)
+'                End If
+'            End Sub
+'        End If
+'    End Sub
+'    Private Sub UpdateSalesPriceHistoryGrid(e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormShowEventArgs,
+'                                        entryView As DevExpress.XtraGrid.Views.Grid.GridView)
+
+'        Dim handle = entryView.FocusedRowHandle
+'        Dim itemCode = If(handle >= 0, TryCast(entryView.GetRowCellValue(handle, "ItemCode"), String), Nothing)
+
+'        Dim history = LoadSalesPriceHistory(e, If(String.IsNullOrEmpty(itemCode), Nothing, itemCode))
+
+'        Dim salesGrid = GetAllControls1(e.Form) _
+'        .OfType(Of DevExpress.XtraGrid.GridControl)() _
+'        .FirstOrDefault(Function(g) g.Name = "gctrSalesPriceHistory")
+
+'        If salesGrid IsNot Nothing Then
+'            salesGrid.DataSource = history
+'        End If
+'    End Sub
+'    Private Sub UpdatePurchasePriceHistoryGrid(e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormShowEventArgs,
+'                                           entryView As DevExpress.XtraGrid.Views.Grid.GridView)
+
+'        Dim handle = entryView.FocusedRowHandle
+'        Dim itemCode = If(handle >= 0, TryCast(entryView.GetRowCellValue(handle, "ItemCode"), String), Nothing)
+
+'        Dim history = LoadPurchasePriceHistory(e, If(String.IsNullOrEmpty(itemCode), Nothing, itemCode))
+
+'        Dim tabControl = GetTabControl1(e.Form)
+'        If tabControl Is Nothing Then Return
+
+'        ' Must check tab name manually because AutoCount reuses same names
+'        Dim myTab = tabControl.TabPages.FirstOrDefault(Function(p) p.Name = "tabPurchasePriceHistory1")
+'        If myTab Is Nothing Then Return
+
+'        Dim purchaseGrid = myTab.Controls _
+'        .OfType(Of DevExpress.XtraGrid.GridControl)() _
+'        .FirstOrDefault(Function(g) g.Name = "gctrPurchasePriceHistory")
+
+'        If purchaseGrid IsNot Nothing Then
+'            purchaseGrid.DataSource = history
+'        End If
+'    End Sub
+
+'    Private Sub AttachRibbonClick(e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormShowEventArgs)
+'        Dim ribbonCtrl = e.Form.Ribbon
+'        Dim barBtn = ribbonCtrl.Items _
+'        .OfType(Of DevExpress.XtraBars.BarButtonItem)() _
+'        .FirstOrDefault(Function(b) b.Name = "barBtnShowInstantInfo")
+
+'        If barBtn Is Nothing Then Return
+
+'        ' Attach only once: use Tag to mark handler attached
+'        If Not Object.Equals(barBtn.Tag, "PriceHistoryHandlerAttached") Then
+'            AddHandler barBtn.ItemClick,
+'                Sub(sender As Object, args As DevExpress.XtraBars.ItemClickEventArgs)
+'                    ' Capture the original e here
+'                    e.Form.BeginInvoke(New MethodInvoker(Sub()
+'                                                             Dim tabControl = GetTabControl1(e.Form)
+'                                                             If tabControl Is Nothing Then Return
+
+'                                                             CreateSalesPriceHistoryTab(tabControl, e)
+'                                                             CreatePurchasePriceHistoryTab(tabControl, e)
+
+'                                                             Dim entryGrid = GetAllControls1(e.Form) _
+'                                                                .OfType(Of DevExpress.XtraGrid.GridControl)() _
+'                                                                .FirstOrDefault(Function(g) g.Name = "gridControlDetail")
+
+'                                                             Dim entryView = TryCast(If(entryGrid IsNot Nothing, entryGrid.MainView, Nothing), DevExpress.XtraGrid.Views.Grid.GridView)
+'                                                             If entryView IsNot Nothing Then
+'                                                                 UpdateSalesPriceHistoryGrid(e, entryView)
+'                                                                 UpdatePurchasePriceHistoryGrid(e, entryView)
+'                                                             End If
+'                                                         End Sub))
+'                End Sub
+
+'            barBtn.Tag = "PriceHistoryHandlerAttached"
+'        End If
+'    End Sub
+'    Private Function GetTabControl1(form As XtraForm) As DevExpress.XtraTab.XtraTabControl
+'        Return GetAllControls1(form) _
+'        .OfType(Of DevExpress.XtraTab.XtraTabControl)() _
+'        .FirstOrDefault(Function(tc) tc.Name = "tabctrInquiry")
+'    End Function
+
+'    Private Sub CreateSalesPriceHistoryTab(tabControl As DevExpress.XtraTab.XtraTabControl,
+'                                       e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormShowEventArgs)
+
+'        If tabControl.TabPages.Cast(Of DevExpress.XtraTab.XtraTabPage)().Any(Function(p) p.Name = "tabSalesPriceHistory") Then Return
+
+'        Dim salesTab As New DevExpress.XtraTab.XtraTabPage With {
+'            .Name = "tabSalesPriceHistory",
+'            .Text = "Sales Price History"
+'        }
+
+'        Dim grid As New DevExpress.XtraGrid.GridControl With {
+'            .Dock = DockStyle.Fill,
+'            .Name = "gctrSalesPriceHistory"
+'        }
+
+'        Dim view As New DevExpress.XtraGrid.Views.Grid.GridView(grid) With {
+'            .Name = "gvSalesPriceHistory"
+'        }
+'        view.OptionsBehavior.Editable = False
+'        view.OptionsView.ShowGroupPanel = False
+
+'        grid.MainView = view
+'        grid.ViewCollection.Add(view)
+
+'        Dim dt = LoadSalesPriceHistory(e, Nothing)
+'        Dim historyList = MapToPriceHistoryEntities(dt)
+'        grid.DataSource = historyList
+
+'        salesTab.Controls.Add(grid)
+'        tabControl.TabPages.Add(salesTab)
+
+'        salesTab.BeginInvoke(CType(Sub() PriceHistoryColumnProperties(grid), MethodInvoker))
+
+'        AddHandler view.DoubleClick, Sub(sender2, e2) HandleSalesPriceHistoryDoubleClick(e, sender2)
+'    End Sub
+'    Private Function LoadSalesPriceHistory(e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormShowEventArgs,
+'                                       itemCode As String) As DataTable
+'        Dim dt As New DataTable()
+'        Dim sb As New StringBuilder()
+
+'        Dim docTypes() As String = {"SO", "DO", "IV", "CS", "CN", "DN"}
+'        Dim docTypeDocStatus As New HashSet(Of String) From {"SO", "DO", "IV", "CN", "DN"}
+
+'        sb.AppendLine(";WITH AllDocs AS (")
+
+'        For i As Integer = 0 To docTypes.Length - 1
+'            Dim docType = docTypes(i)
+'            If i > 0 Then sb.AppendLine("UNION ALL")
+
+'            Dim header = docType
+'            Dim detail = docType & "DTL"
+'            Dim hasStatus = docTypeDocStatus.Contains(docType)
+
+'            sb.AppendLine($"
+'            SELECT A.DocKey,
+'                   A.DebtorCode AS AccNo,
+'                   A.DebtorName AS CompanyName,
+'                   A.DocNo,
+'                   '{docType}' AS DocType,
+'            A.DocDate,
+'                   A.BranchCode,
+'                   B.ItemCode,
+'                   B.Description,
+'                   B.Desc2,
+'                   ISNULL(B.BatchNo, '') AS BatchNo,
+'                   B.UOM,
+'                   g.CurrencyCode,
+'                   B.Location,
+'                   B.Qty,
+'                   B.UnitPrice,
+'                   B.SubTotal,
+'                   D.AreaCode,
+'                   A.LastModified,
+'                   A.CreatedTimeStamp
+'              FROM {header} A
+'              INNER JOIN {detail} B ON A.DocKey = B.DocKey
+'              INNER JOIN Debtor D ON A.DebtorCode = D.AccNo
+'              LEFT JOIN GLMast g ON g.AccNo = A.DebtorCode
+'              {(If(hasStatus, "WHERE A.DocStatus IN ('A','V')", ""))}")
+'        Next
+
+'        sb.AppendLine("),")
+'        sb.AppendLine("Ranked AS (")
+'        sb.AppendLine("    SELECT *,")
+'        sb.AppendLine("           ROW_NUMBER() OVER (")
+'        sb.AppendLine("               PARTITION BY ItemCode")
+'        sb.AppendLine("               ORDER BY DocDate DESC, DocKey DESC")
+'        sb.AppendLine("           ) AS rn")
+'        sb.AppendLine("      FROM AllDocs")
+'        sb.AppendLine(")")
+'        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+'        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode,")
+'        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+'        sb.AppendLine("  FROM Ranked")
+'        sb.AppendLine(" WHERE rn <= 5")
+'        If Not String.IsNullOrEmpty(itemCode) Then
+'            sb.AppendLine("     AND ItemCode = @ItemCode")
+'        End If
+'        sb.AppendLine(" ORDER BY ItemCode, DocDate DESC, DocNo DESC, AccNo;")
+
+'        Dim sql As String = sb.ToString()
+
+'        Using sqlconn As New SqlConnection(e.DBSetting.ConnectionString)
+'            Using cmd As New SqlCommand(sql, sqlconn)
+'                Using da As New SqlDataAdapter(cmd)
+'                    If Not String.IsNullOrEmpty(itemCode) Then
+'                        cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+'                    End If
+
+'                    da.Fill(dt)
+'                End Using
+'            End Using
+'        End Using
+
+'        Return dt
+'    End Function
+'    Private Sub HandleSalesPriceHistoryDoubleClick(e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormShowEventArgs,
+'                                               sender2 As Object)
+'        Dim gv = TryCast(sender2, DevExpress.XtraGrid.Views.Grid.GridView)
+'        If gv Is Nothing Then Return
+
+'        Dim pt = gv.GridControl.PointToClient(Control.MousePosition)
+'        Dim hitInfo = gv.CalcHitInfo(pt)
+'        If Not (hitInfo.InRow OrElse hitInfo.InRowCell) Then Return
+
+'        Dim docKeyObj = gv.GetRowCellValue(hitInfo.RowHandle, "DocKey")
+'        Dim docType As String = Convert.ToString(gv.GetRowCellValue(hitInfo.RowHandle, "DocType"))
+
+'        If docKeyObj Is Nothing OrElse String.IsNullOrEmpty(docType) Then Return
+
+'        Dim docKey As Long = Convert.ToInt64(docKeyObj)
+
+'        Select Case docType
+'            Case "SO"
+'                AutoCount.Invoicing.Sales.SalesOrder.FormSalesOrderCmd.ViewDocument(e.UserSession, docKey)
+'            Case "DO"
+'                AutoCount.Invoicing.Sales.DeliveryOrder.FormDeliveryOrderCmd.ViewDocument(e.UserSession, docKey)
+'            Case "IV"
+'                AutoCount.Invoicing.Sales.Invoice.FormInvoiceCmd.ViewDocument(e.UserSession, docKey)
+'            Case "CS"
+'                AutoCount.Invoicing.Sales.CashSale.FormCashSaleCmd.ViewDocument(e.UserSession, docKey)
+'            Case "CN"
+'                AutoCount.Invoicing.Sales.CreditNote.FormCreditNoteCmd.ViewDocument(e.UserSession, docKey)
+'            Case "DN"
+'                AutoCount.Invoicing.Sales.DebitNote.FormDebitNoteCmd.ViewDocument(e.UserSession, docKey)
+'        End Select
+'    End Sub
+
+'    Private Sub CreatePurchasePriceHistoryTab(tabControl As DevExpress.XtraTab.XtraTabControl,
+'                                          e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormShowEventArgs)
+
+'        ' Prevent duplicate tab creation
+'        If tabControl.TabPages.Cast(Of DevExpress.XtraTab.XtraTabPage)().Any(Function(p) p.Name = "tabPurchasePriceHistory1") Then
+'            Return
+'        End If
+
+'        ' Create new tab page
+'        Dim purchaseTab As New DevExpress.XtraTab.XtraTabPage With {
+'            .Name = "tabPurchasePriceHistory1",
+'            .Text = "Purchase Price History"
+'        }
+
+'        ' Create grid control
+'        Dim grid As New DevExpress.XtraGrid.GridControl With {
+'            .Dock = DockStyle.Fill,
+'            .Name = "gctrPurchasePriceHistory"
+'        }
+
+'        ' Create grid view
+'        Dim view As New DevExpress.XtraGrid.Views.Grid.GridView(grid) With {
+'            .Name = "gvPurchasePriceHistory"
+'        }
+'        view.OptionsBehavior.Editable = False
+'        view.OptionsView.ShowGroupPanel = False
+
+'        grid.MainView = view
+'        grid.ViewCollection.Add(view)
+
+'        ' Load data and bind
+'        Dim dt = LoadPurchasePriceHistory(e, Nothing)
+'        Dim historyList = MapToPriceHistoryEntities(dt)
+'        grid.DataSource = historyList
+
+'        purchaseTab.Controls.Add(grid)
+'        tabControl.TabPages.Add(purchaseTab)
+
+'        ' Apply column properties after rendering
+'        purchaseTab.BeginInvoke(DirectCast(Sub()
+'                                               PriceHistoryColumnProperties(grid)
+'                                           End Sub, MethodInvoker))
+
+'        ' Handle double-click
+'        AddHandler view.DoubleClick, Sub(sender2, e2) HandlePurchasePriceHistoryDoubleClick(e, sender2)
+'    End Sub
+'    Private Function LoadPurchasePriceHistory(e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormShowEventArgs,
+'                                          itemCode As String) As DataTable
+'        Dim dt As New DataTable()
+'        Dim sb As New StringBuilder()
+
+'        Dim docTypes() As String = {"PO", "GR", "PI"}
+
+'        sb.AppendLine(";WITH AllDocs AS (")
+
+'        For i As Integer = 0 To docTypes.Length - 1
+'            Dim docType = docTypes(i)
+'            If i > 0 Then sb.AppendLine("UNION ALL")
+
+'            Dim header = docType
+'            Dim detail = docType & "DTL"
+
+'            sb.AppendLine($"
+'            SELECT 
+'                A.DocKey,
+'                A.CreditorCode AS AccNo,
+'                A.CreditorName AS CompanyName,
+'                A.DocNo,
+'                '{docType}' AS DocType,
+'                A.DocDate,
+'                A.BranchCode,
+'                B.ItemCode,
+'                B.Description,
+'                B.Desc2,
+'                ISNULL(B.BatchNo, '') AS BatchNo,
+'                B.UOM,
+'                g.CurrencyCode,
+'                B.Location,
+'                B.Qty,
+'                B.UnitPrice,
+'                B.SubTotal,
+'                C.AreaCode,
+'                A.LastModified,
+'                A.CreatedTimeStamp
+'            FROM {header} A
+'            INNER JOIN {detail} B ON A.DocKey = B.DocKey
+'            INNER JOIN Creditor C ON A.CreditorCode = C.AccNo
+'            LEFT JOIN GLMast g ON g.AccNo = A.CreditorCode")
+'        Next
+
+'        sb.AppendLine("),")
+'        sb.AppendLine("Ranked AS (")
+'        sb.AppendLine("    SELECT *,")
+'        sb.AppendLine("           ROW_NUMBER() OVER (")
+'        sb.AppendLine("               PARTITION BY ItemCode")
+'        sb.AppendLine("               ORDER BY DocDate DESC, DocKey DESC")
+'        sb.AppendLine("           ) AS rn")
+'        sb.AppendLine("    FROM AllDocs")
+'        sb.AppendLine(")")
+'        sb.AppendLine("SELECT DocKey, AccNo, CompanyName, DocNo, DocType, DocDate, BranchCode,")
+'        sb.AppendLine("       ItemCode, Description, Desc2, BatchNo, UOM, CurrencyCode,")
+'        sb.AppendLine("       Location, Qty, UnitPrice, SubTotal, AreaCode, LastModified, CreatedTimeStamp")
+'        sb.AppendLine("  FROM Ranked")
+'        sb.AppendLine(" WHERE rn <= 5")
+
+'        If Not String.IsNullOrEmpty(itemCode) Then
+'            sb.AppendLine("     AND ItemCode = @ItemCode")
+'        End If
+
+'        sb.AppendLine(" ORDER BY ItemCode, DocDate DESC, DocNo DESC, AccNo;")
+
+'        Dim sql As String = sb.ToString()
+
+'        Using sqlconn As New SqlConnection(e.DBSetting.ConnectionString)
+'            Using cmd As New SqlCommand(sql, sqlconn)
+'                Using da As New SqlDataAdapter(cmd)
+'                    If Not String.IsNullOrEmpty(itemCode) Then
+'                        cmd.Parameters.AddWithValue("@ItemCode", itemCode)
+'                    End If
+
+'                    da.Fill(dt)
+'                End Using
+'            End Using
+'        End Using
+
+'        Return dt
+'    End Function
+'    Private Sub HandlePurchasePriceHistoryDoubleClick(e As AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceEntry.FormShowEventArgs, sender2 As Object)
+'        Dim gv = TryCast(sender2, DevExpress.XtraGrid.Views.Grid.GridView)
+'        If gv Is Nothing Then Return
+
+'        Dim pt = gv.GridControl.PointToClient(Control.MousePosition)
+'        Dim hitInfo = gv.CalcHitInfo(pt)
+'        If Not (hitInfo.InRow OrElse hitInfo.InRowCell) Then Return
+
+'        Dim docKeyObj = gv.GetRowCellValue(hitInfo.RowHandle, "DocKey")
+'        Dim docType = TryCast(gv.GetRowCellValue(hitInfo.RowHandle, "DocType"), String)
+'        If docKeyObj Is Nothing OrElse String.IsNullOrEmpty(docType) Then Return
+
+'        Dim docKey As Long = Convert.ToInt64(docKeyObj)
+
+'        Select Case docType
+'            Case "PO"
+'                AutoCount.Invoicing.Purchase.PurchaseOrder.FormPurchaseOrderCmd.ViewDocument(e.UserSession, docKey)
+'            Case "GR"
+'                AutoCount.Invoicing.Purchase.GoodsReceivedNote.FormGoodsReceivedNoteCmd.ViewDocument(e.UserSession, docKey)
+'            Case "PI"
+'                AutoCount.Invoicing.Purchase.PurchaseInvoice.FormPurchaseInvoiceCmd.ViewDocument(e.UserSession, docKey)
+'        End Select
+'    End Sub
+
+'    Public Shared Function MapToPriceHistoryEntities(dt As DataTable) As List(Of PriceHistoryEntity)
+'        Dim list As New List(Of PriceHistoryEntity)()
+'        For Each row As DataRow In dt.Rows
+'            Dim entity As New PriceHistoryEntity With {
+'            .DocKey = If(row("DocKey") IsNot DBNull.Value, Convert.ToInt64(row("DocKey")), 0),
+'            .DocNo = TryCast(row("DocNo"), String),
+'            .DocType = TryCast(row("DocType"), String),
+'            .DocDate = If(row("DocDate") IsNot DBNull.Value, Convert.ToDateTime(row("DocDate")), DateTime.MinValue),
+'            .BranchCode = TryCast(row("BranchCode"), String),
+'            .AreaCode = TryCast(row("AreaCode"), String),
+'            .LastModified = If(row("LastModified") IsNot DBNull.Value, Convert.ToDateTime(row("LastModified")), DateTime.MinValue),
+'            .CreatedTimeStamp = If(row("CreatedTimeStamp") IsNot DBNull.Value, Convert.ToDateTime(row("CreatedTimeStamp")), DateTime.MinValue),
+'            .AccNo = TryCast(row("AccNo"), String),
+'            .CompanyName = TryCast(row("CompanyName"), String),
+'            .ItemCode = TryCast(row("ItemCode"), String),
+'            .Description = TryCast(row("Description"), String),
+'            .Desc2 = TryCast(row("Desc2"), String),
+'            .BatchNo = TryCast(row("BatchNo"), String),
+'            .UOM = TryCast(row("UOM"), String),
+'            .Location = TryCast(row("Location"), String),
+'            .Qty = If(row("Qty") IsNot DBNull.Value, Convert.ToDecimal(row("Qty")), 0D),
+'            .UnitPrice = If(row("UnitPrice") IsNot DBNull.Value, Convert.ToDecimal(row("UnitPrice")), 0D),
+'            .SubTotal = If(row("SubTotal") IsNot DBNull.Value, Convert.ToDecimal(row("SubTotal")), 0D),
+'            .CurrencyCode = TryCast(row("CurrencyCode"), String)
+'        }
+'            list.Add(entity)
+'        Next
+'        Return list
+'    End Function
+'    Private Sub PriceHistoryColumnProperties(grid As DevExpress.XtraGrid.GridControl)
+'        Dim gv = TryCast(grid.MainView, DevExpress.XtraGrid.Views.Grid.GridView)
+'        If gv Is Nothing Then Return
+
+'        gv.PopulateColumns()
+
+'        SetColumn(gv, NameOf(PriceHistoryEntity.DocKey), False, True)
+'        SetColumn(gv, NameOf(PriceHistoryEntity.Desc2), False, True)
+'        SetColumn(gv, NameOf(PriceHistoryEntity.BranchCode), False, True)
+'        SetColumn(gv, NameOf(PriceHistoryEntity.AreaCode), False, True)
+'        SetColumn(gv, NameOf(PriceHistoryEntity.CurrencyCode), False, True)
+'        SetColumn(gv, NameOf(PriceHistoryEntity.DocDate), True, True, "yyyy/MM/dd")
+'        SetColumn(gv, NameOf(PriceHistoryEntity.CreatedTimeStamp), False, True, "yyyy/MM/dd HH:mm : ss")
+'        SetColumn(gv, NameOf(PriceHistoryEntity.LastModified), False, True, "yyyy/MM/dd HH: mm : ss")
+'    End Sub
+'    Private Sub SetColumn(gv As DevExpress.XtraGrid.Views.Grid.GridView, fieldName As String, visible As Boolean, showInCustomizationForm As Boolean, Optional format As String = Nothing)
+'        Dim col = gv.Columns.ColumnByFieldName(fieldName)
+'        If col Is Nothing Then Return
+
+'        col.Visible = visible
+'        col.OptionsColumn.ShowInCustomizationForm = showInCustomizationForm
+
+'        If Not String.IsNullOrEmpty(format) Then
+'            col.DisplayFormat.FormatType = DevExpress.Utils.FormatType.DateTime
+'            col.DisplayFormat.FormatString = format
+'        End If
+'    End Sub
+
+'#End Region
+'End Class
+'<--- original code --->

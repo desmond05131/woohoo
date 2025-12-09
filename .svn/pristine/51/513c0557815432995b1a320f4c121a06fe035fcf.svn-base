@@ -1,0 +1,15 @@
+﻿
+<AutoCount.PlugIn.MenuItem("About", 99, True)>
+Public Class CallLicenseForm
+    Private Property UserSession As AutoCount.Authentication.UserSession
+    Public Sub New(UserSession As AutoCount.Authentication.UserSession)
+        Me.UserSession = UserSession
+        CallLicense()
+    End Sub
+
+    Private Sub CallLicense()
+        Dim ALicenseControl As New LicenseController
+        ALicenseControl.ShowLicenseEntry()
+    End Sub
+
+End Class

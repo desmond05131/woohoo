@@ -1,0 +1,98 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Alia\\40022_22 - PLENTONG LIEN HUAT\\40022_22\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{0C3F62A5-E09B-49AB-B2E6-717570491E78}|FreelyPlugIns\\FreelyCreative.StockItemInquiry-40022.vbproj|c:\\alia\\40022_22 - plentong lien huat\\40022_22\\freelyplugins\\autocountscript\\stockitem.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}",
+      "RelativeMoniker": "D:0:0:{0C3F62A5-E09B-49AB-B2E6-717570491E78}|FreelyPlugIns\\FreelyCreative.StockItemInquiry-40022.vbproj|solutionrelative:freelyplugins\\autocountscript\\stockitem.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{0C3F62A5-E09B-49AB-B2E6-717570491E78}|FreelyPlugIns\\FreelyCreative.StockItemInquiry-40022.vbproj|C:\\Alia\\40022_22 - PLENTONG LIEN HUAT\\40022_22\\freelyplugins\\main\\registerautocountscript\\registerautocountscript.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}",
+      "RelativeMoniker": "D:0:0:{0C3F62A5-E09B-49AB-B2E6-717570491E78}|FreelyPlugIns\\FreelyCreative.StockItemInquiry-40022.vbproj|solutionrelative:freelyplugins\\main\\registerautocountscript\\registerautocountscript.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{0C3F62A5-E09B-49AB-B2E6-717570491E78}|FreelyPlugIns\\FreelyCreative.StockItemInquiry-40022.vbproj|C:\\Alia\\40022_22 - PLENTONG LIEN HUAT\\40022_22\\freelyplugins\\autocountscript\\reorderadvicereport.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}",
+      "RelativeMoniker": "D:0:0:{0C3F62A5-E09B-49AB-B2E6-717570491E78}|FreelyPlugIns\\FreelyCreative.StockItemInquiry-40022.vbproj|solutionrelative:freelyplugins\\autocountscript\\reorderadvicereport.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{0C3F62A5-E09B-49AB-B2E6-717570491E78}|FreelyPlugIns\\FreelyCreative.StockItemInquiry-40022.vbproj|C:\\Alia\\40022_22 - PLENTONG LIEN HUAT\\40022_22\\freelyplugins\\main\\program.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}",
+      "RelativeMoniker": "D:0:0:{0C3F62A5-E09B-49AB-B2E6-717570491E78}|FreelyPlugIns\\FreelyCreative.StockItemInquiry-40022.vbproj|solutionrelative:freelyplugins\\main\\program.vb||{2C015C70-C72C-11D0-88C3-00A0C9110049}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "SelectedChildIndex": 3,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{eefa5220-e298-11d0-8f78-00a0c9110057}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "ReorderAdviceReport.vb",
+              "DocumentMoniker": "C:\\Alia\\40022_22 - PLENTONG LIEN HUAT\\40022_22\\FreelyPlugIns\\AutoCountScript\\ReorderAdviceReport.vb",
+              "RelativeDocumentMoniker": "FreelyPlugIns\\AutoCountScript\\ReorderAdviceReport.vb",
+              "ToolTip": "C:\\Alia\\40022_22 - PLENTONG LIEN HUAT\\40022_22\\FreelyPlugIns\\AutoCountScript\\ReorderAdviceReport.vb",
+              "RelativeToolTip": "FreelyPlugIns\\AutoCountScript\\ReorderAdviceReport.vb",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAqwAMAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003361|",
+              "WhenOpened": "2025-09-22T01:12:44.438Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "RegisterAutoCountScript.vb",
+              "DocumentMoniker": "C:\\Alia\\40022_22 - PLENTONG LIEN HUAT\\40022_22\\FreelyPlugIns\\Main\\RegisterAutoCountScript\\RegisterAutoCountScript.vb",
+              "RelativeDocumentMoniker": "FreelyPlugIns\\Main\\RegisterAutoCountScript\\RegisterAutoCountScript.vb",
+              "ToolTip": "C:\\Alia\\40022_22 - PLENTONG LIEN HUAT\\40022_22\\FreelyPlugIns\\Main\\RegisterAutoCountScript\\RegisterAutoCountScript.vb",
+              "RelativeToolTip": "FreelyPlugIns\\Main\\RegisterAutoCountScript\\RegisterAutoCountScript.vb",
+              "ViewState": "AgIAAAIAAAAAAAAAAAAQwB8AAABzAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003361|",
+              "WhenOpened": "2025-09-22T01:05:35.085Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "StockItem.vb",
+              "DocumentMoniker": "C:\\Alia\\40022_22 - PLENTONG LIEN HUAT\\40022_22\\FreelyPlugIns\\AutoCountScript\\StockItem.vb",
+              "RelativeDocumentMoniker": "FreelyPlugIns\\AutoCountScript\\StockItem.vb",
+              "ToolTip": "C:\\Alia\\40022_22 - PLENTONG LIEN HUAT\\40022_22\\FreelyPlugIns\\AutoCountScript\\StockItem.vb",
+              "RelativeToolTip": "FreelyPlugIns\\AutoCountScript\\StockItem.vb",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAwAAAA7AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003361|",
+              "WhenOpened": "2025-09-18T00:56:48.813Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "Program.vb",
+              "DocumentMoniker": "C:\\Alia\\40022_22 - PLENTONG LIEN HUAT\\40022_22\\FreelyPlugIns\\Main\\Program.vb",
+              "RelativeDocumentMoniker": "FreelyPlugIns\\Main\\Program.vb",
+              "ToolTip": "C:\\Alia\\40022_22 - PLENTONG LIEN HUAT\\40022_22\\FreelyPlugIns\\Main\\Program.vb",
+              "RelativeToolTip": "FreelyPlugIns\\Main\\Program.vb",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABMAAAALAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003361|",
+              "WhenOpened": "2025-08-11T03:24:34.6Z"
+            }
+          ]
+        },
+        {
+          "DockedWidth": 38,
+          "SelectedChildIndex": -1,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{aa2115a1-9712-457b-9047-dbb71ca2cdd2}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

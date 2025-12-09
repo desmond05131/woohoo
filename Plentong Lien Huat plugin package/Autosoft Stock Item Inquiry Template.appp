@@ -1,0 +1,21 @@
+<?xml version="1.0" standalone="yes"?>
+<AutoCount_x0020_Plug-in_x0020_Package_x0020_Project>
+  <Properties>
+    <ProjectFileVersion>1.1</ProjectFileVersion>
+    <Guid>d596f099-fc53-48ce-b5af-48d2b7dcc232</Guid>
+    <Name>Ronas: Item Inquiry</Name>
+    <Version>2.2.21927.310</Version>
+    <Manufacturer>Autosoft Solution Sdn Bhd</Manufacturer>
+    <ManufacturerUrl>https://autosoftsolution.com.my/</ManufacturerUrl>
+    <Copyright>Copyright 2025 @ Autosoft Solution Sdn Bhd</Copyright>
+    <SalesPhone>+60 12-783 1357</SalesPhone>
+    <SupportPhone>+60 17-773 1357</SupportPhone>
+    <Description>Autosoft Solution: Stock Item Inquiry</Description>
+    <AssemblyFile>AutosoftSolution.StockItemInquiry.dll</AssemblyFile>
+    <ScriptLanguage>C#</ScriptLanguage>
+  </Properties>
+  <Files>
+    <Filename>C:\Alia\SVN Plentong Lien Huat\40022_22\FreelyPlugIns\bin\Debug\AutosoftSolution.StockItemInquiry.dll</Filename>
+    <ExecuteAfterExtracted>false</ExecuteAfterExtracted>
+  </Files>
+</AutoCount_x0020_Plug-in_x0020_Package_x0020_Project>

@@ -1,0 +1,35 @@
+﻿Imports System
+Imports System.Reflection
+Imports System.Runtime.InteropServices
+
+' General Information about an assembly is controlled through the following 
+' set of attributes. Change these attribute values to modify the information
+' associated with an assembly.
+
+' Review the values of the assembly attributes
+
+<Assembly: AssemblyTitle("Autosoft: Stock Item Inquiry")>
+<Assembly: AssemblyDescription("AutoCount 2.2 Build 25 Rev 34")>
+<Assembly: AssemblyCompany("Autosoft Solution Sdn Bhd")>
+<Assembly: AssemblyProduct("Autosoft: Stock Item Inquiry")>
+<Assembly: AssemblyCopyright("Copyright © Autosoft Solution Sdn Bhd 2025")>
+<Assembly: AssemblyTrademark("")> 
+
+<Assembly: ComVisible(False)>
+
+'The following GUID is for the ID of the typelib if this project is exposed to COM
+<Assembly: Guid("0351d81d-d594-4068-aebb-656fbe4cab5e")>
+
+' Version information for an assembly consists of the following four values:
+'
+'      Major Version
+'      Minor Version 
+'      Build Number
+'      Revision
+'
+' You can specify all the values or you can default the Build and Revision Numbers 
+' by using the '*' as shown below:
+' <Assembly: AssemblyVersion("1.0.*")> 
+
+<Assembly: AssemblyVersion("2.6.22534.1119")>
+<Assembly: AssemblyFileVersion("2.6.22534.1119")>

@@ -1,0 +1,37 @@
+﻿Imports RootFreelyLicense
+Imports RootFreelyLicense.FreelyKeyValidation
+
+Public Class LicenseController
+
+    Public Property LicenseControl As FreelyKeyValidation
+    Private Property _LicenseModule As List(Of LicenseModule)
+
+    Public Sub New()
+        _LicenseControl = RootFreelyLicense.License.Create(FreelyPlugIns._ProductID, FreelyPlugIns.ProductName)
+        _LicenseControl.IdentifyLicense()
+        _LicenseModule = New List(Of LicenseModule)()
+    End Sub
+
+
+    Public Function ShowLicenseEntry() As DialogResult
+        Return Me._LicenseControl.ShowLicense(ShowLicenseMode.Normal)
+    End Function
+
+    Public Function IsValidLicense() As Boolean
+        _LicenseControl.IdentifyLicense()
+        If Debugger.IsAttached Then Return True
+        If (_LicenseControl.License.IsValid) Then
+            If (_LicenseControl.License.ExpiredDate.Subtract(System.DateTime.Today).Days < 0) Then
+                Me._LicenseControl.ShowLicense(ShowLicenseMode.Normal)
+                Return False
+            End If
+            Return True
+        Else
+            Me._LicenseControl.ShowLicense(ShowLicenseMode.Normal)
+            Return False
+        End If
+        Return False
+
+    End Function
+
+End Class

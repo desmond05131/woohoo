@@ -1,0 +1,61 @@
+<?xml version="1.0" standalone="yes"?>
+<AutoCount_x0020_Plug-in_x0020_Package_x0020_Project>
+  <Properties>
+    <ProjectFileVersion>1.1</ProjectFileVersion>
+    <Guid>d596f099-fc53-48ce-b5af-48d2b7dcc232</Guid>
+    <Name>Freely: Item Inquiry</Name>
+    <Version>2.1.1218.1129</Version>
+    <Manufacturer>Freely Creative</Manufacturer>
+    <ManufacturerUrl>https://freely.my/</ManufacturerUrl>
+    <Copyright>-</Copyright>
+    <SalesPhone />
+    <SupportPhone />
+    <Description>AutoCount 2.2 Build 12 Rev 18
+
+New button in Stock item and Stock item detail.
+The button allows direct access into Stock Item Inquiry in stock item &amp; stock item detail.</Description>
+    <WhatsNew>2.1.1218.1129
+-------------
+Upgrade To AutoCount 2.2 Build 12 Rev 18
+
+1.0.0.7
+-------
+upgrade AutoCount Version
+
+1.0.0.6
+-------
+upgrade version 
+
+1.0.0.5
+-------
+up to devexpress 19.2
+
+1.0.0.4
+--------
+fix inquiry wrong itemcode in edit form
+
+1.0.0.3
+--------
+fix btn inquiry bug g
+btn inquiry allow to control by user
+
+1.0.0.1
+--------
+Upgrade autocount to latest
+
+1.0.0.0
+--------
+New Release</WhatsNew>
+    <AssemblyFile>FreelyCreative.StockItemInquiry.dll</AssemblyFile>
+    <MinimumAccountingVersion />
+    <ScriptLanguage>C#</ScriptLanguage>
+  </Properties>
+  <Files>
+    <Filename>D:\C\Freely\HIPERCOM\PLENTONG LIENHUAT\FreelyPlugIns\bin\Debug\FreelyCreative.StockItemInquiry.dll</Filename>
+    <ExecuteAfterExtracted>false</ExecuteAfterExtracted>
+  </Files>
+  <Files>
+    <Filename>D:\C\Freely\HIPERCOM\PLENTONG LIENHUAT\FreelyPlugIns\bin\Debug\FreelyLicense.dll</Filename>
+    <ExecuteAfterExtracted>false</ExecuteAfterExtracted>
+  </Files>
+</AutoCount_x0020_Plug-in_x0020_Package_x0020_Project>

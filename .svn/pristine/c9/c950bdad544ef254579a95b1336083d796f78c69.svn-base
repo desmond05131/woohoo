@@ -1,0 +1,76 @@
+﻿Imports AutoCount.Application
+Imports DevExpress.XtraEditors
+
+Public Class ReorderAdviceReport
+    Private Function FindControlRecursive(parent As Control, type As Type) As Control
+        For Each child As Control In parent.Controls
+            If type.IsAssignableFrom(child.GetType()) Then
+                Return child
+            End If
+
+            Dim found As Control = FindControlRecursive(child, type)
+            If found IsNot Nothing Then
+                Return found
+            End If
+        Next
+
+        Return Nothing
+    End Function
+
+    Public Sub OnFormInitialize(sender As Object, e As AutoCount.Stock.ReorderAdvice.FormReorderAdvice.FormInitializeEventArgs)
+        Dim form As AutoCount.Stock.ReorderAdvice.FormReorderAdvice = DirectCast(sender, AutoCount.Stock.ReorderAdvice.FormReorderAdvice)
+        Dim sbtnClose As SimpleButton = TryCast(form.Controls.Find("btnClose", True).FirstOrDefault(), SimpleButton)
+
+        Dim btnOpenStockItem As New SimpleButton() With {
+            .Text = "Stock Item Maintenance",
+            .Name = "btnStockItemMaintenance",
+            .Width = sbtnClose.Width + 60,
+            .Height = sbtnClose.Height,
+            .Location = New Point(sbtnClose.Location.X + sbtnClose.Width + 5, sbtnClose.Location.Y)
+        }
+
+        e.PanelButtons.Controls.Add(btnOpenStockItem)
+
+        AddHandler btnOpenStockItem.Click,
+            Sub(s, args)
+                Dim uc As AutoCount.Stock.ReorderAdvice.UCReorderAdvice =
+                    TryCast(FindControlRecursive(form, GetType(AutoCount.Stock.ReorderAdvice.UCReorderAdvice)),
+                    AutoCount.Stock.ReorderAdvice.UCReorderAdvice)
+
+                If uc IsNot Nothing Then
+                    Dim gv = uc.GridView
+                    If gv IsNot Nothing AndAlso gv.FocusedRowHandle >= 0 Then
+                        Dim session = e.UserSession
+                        Dim dbSetting = e.DBSetting
+
+                        Dim itemCode As String = gv.GetFocusedRowCellValue("ItemCode")?.ToString()
+
+                        If Not String.IsNullOrEmpty(itemCode) Then
+                            Try
+                                Dim itemEntity = AutoCount.Stock.Item.ItemDataAccess.Create(session, dbSetting).
+                                    LoadItem(itemCode, AutoCount.Stock.Item.ItemEntryAction.View)
+
+                                If itemEntity Is Nothing Then
+                                    AutoCount.AppMessage.ShowMessage(Nothing,
+                                        AutoCount.Localization.Localizer.GetString(
+                                            AutoCount.Stock.Item.ItemCommandFormStringId.ItemNotFound))
+                                    Return
+                                End If
+
+                                Dim threadForm As New ThreadForm(
+                                    GetType(AutoCount.Stock.Item.FormStockItem).AssemblyQualifiedName,
+                                    New Type() {itemEntity.GetType(), dbSetting.GetType()},
+                                    New Object() {itemEntity, dbSetting})
+
+                                threadForm.Show()
+                            Catch ex As Exception
+                                XtraMessageBox.Show(ex.Message, "Ronas Mutiara", MessageBoxButtons.OK, MessageBoxIcon.[Error])
+                            End Try
+                            'Dim stockform As New AutoCount.Stock.Item.FormItemCmd(session)
+                            'stockform.Show() ' <--- will display the stock item maintenance window
+                        End If
+                    End If
+                End If
+            End Sub
+    End Sub
+End Class

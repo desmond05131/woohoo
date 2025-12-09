@@ -1,0 +1,477 @@
+﻿<?xml version="1.0"?>
+<doc>
+<assembly>
+<name>
+AutosoftSolution.StockItemInquiry
+</name>
+</assembly>
+<members>
+<member name="T:FreelyCreative.StockItemInquiry.My.Resources.Resources">
+<summary>
+  A strongly-typed resource class, for looking up localized strings, etc.
+</summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.My.Resources.Resources.ResourceManager">
+<summary>
+  Returns the cached ResourceManager instance used by this class.
+</summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.My.Resources.Resources.Culture">
+<summary>
+  Overrides the current thread's CurrentUICulture property for all
+  resource lookups using this strongly typed resource class.
+</summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.My.Resources.Resources.apply_16x16">
+<summary>
+  Looks up a localized resource of type System.Drawing.Bitmap.
+</summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.My.Resources.Resources.apply_32x32">
+<summary>
+  Looks up a localized resource of type System.Drawing.Bitmap.
+</summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.My.Resources.Resources.apply_32x321">
+<summary>
+  Looks up a localized resource of type System.Drawing.Bitmap.
+</summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.My.Resources.Resources.apply_32x322">
+<summary>
+  Looks up a localized resource of type System.Drawing.Bitmap.
+</summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.My.Resources.Resources.cancel_32x32">
+<summary>
+  Looks up a localized resource of type System.Drawing.Bitmap.
+</summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.My.Resources.Resources.close_32x32">
+<summary>
+  Looks up a localized resource of type System.Drawing.Bitmap.
+</summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.My.Resources.Resources.database_32x32">
+<summary>
+  Looks up a localized resource of type System.Drawing.Bitmap.
+</summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.My.Resources.Resources.selecttable_32x32">
+<summary>
+  Looks up a localized resource of type System.Drawing.Bitmap.
+</summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.My.Resources.Resources.send_32x32">
+<summary>
+  Looks up a localized resource of type System.Drawing.Bitmap.
+</summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.My.Resources.Resources.stockitemmaintenance">
+<summary>
+  Looks up a localized resource of type System.Byte[].
+</summary>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.Controls.FreelyControlHelper.#ctor(System.String,DevExpress.XtraEditors.PanelControl,System.String,System.Boolean)">
+ <summary>
+ 
+ </summary>
+ <param name="PluginName">this plugin name will show in the control Group text, use short and meaningful name</param>
+ <param name="HeaderPanel"></param>
+ <param name="DocType"></param>
+ <param name="IsEditForm"></param>
+ <remarks></remarks>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.Freely.Controls.Excel.ExcelConnectingBuilder.DataSource">
+ <summary>
+ Define Excel File Path
+ </summary>
+ <value></value>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.Freely.Controls.Excel.ExcelConnectingExtendedProperties.HDR">
+ <summary>
+ HDR = Mean Need First Row as Header 
+ </summary>
+ <value></value>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="T:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator">
+ <summary>
+ Animates a form when it is shown, hidden or closed.
+ </summary>
+ <remarks>
+ MDI child forms do not support the Blend method and only support other methods while being displayed for the first time and when closing.
+ </remarks>
+</member>
+<member name="T:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationMethod">
+ <summary>
+ The methods of animation available.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationMethod.Roll">
+ <summary>
+ Rolls out from edge when showing and into edge when hiding.
+ </summary>
+ <remarks>
+ This is the default animation method and requires a direction.
+ </remarks>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationMethod.Centre">
+ <summary>
+ Expands out from centre when showing and collapses into centre when hiding.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationMethod.Slide">
+ <summary>
+ Slides out from edge when showing and slides into edge when hiding.
+ </summary>
+ <remarks>
+ Requires a direction.
+ </remarks>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationMethod.Blend">
+ <summary>
+ Fades from transaprent to opaque when showing and from opaque to transparent when hiding.
+ </summary>
+</member>
+<member name="T:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationDirection">
+ <summary>
+ The directions in which the Roll and Slide animations can be shown.
+ </summary>
+ <remarks>
+ Horizontal and vertical directions can be combined to create diagonal animations.
+ </remarks>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationDirection.Right">
+ <summary>
+ From left to right.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationDirection.Left">
+ <summary>
+ From right to left.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationDirection.Down">
+ <summary>
+ From top to bottom.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationDirection.Up">
+ <summary>
+ From bottom to top.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AW_HIDE">
+ <summary>
+ Hide the form.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AW_ACTIVATE">
+ <summary>
+ Activate the form.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.DEFAULT_DURATION">
+ <summary>
+ The number of milliseconds over which the animation occurs if no value is specified.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.__form">
+ <summary>
+ The form to be animated.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator._method">
+ <summary>
+ The animation method used to show and hide the form.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator._direction">
+ <summary>
+ The direction in which to Roll or Slide the form.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator._duration">
+ <summary>
+ The number of milliseconds over which the animation is played.
+ </summary>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.Method">
+ <summary>
+ Gets or sets the animation method used to show and hide the form.
+ </summary>
+ <value>
+ The animation method used to show and hide the form.
+ </value>
+ <remarks>
+ <b>Roll</b> is used by default if no method is specified.
+ </remarks>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.Direction">
+ <summary>
+ Gets or sets the direction in which the animation is performed.
+ </summary>
+ <value>
+ The direction in which the animation is performed.
+ </value>
+ <remarks>
+ The direction is only applicable to the <b>Roll</b> and <b>Slide</b> methods.
+ </remarks>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.Duration">
+ <summary>
+ Gets or sets the number of milliseconds over which the animation is played.
+ </summary>
+ <value>
+ The number of milliseconds over which the animation is played.
+ </value>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.Form">
+ <summary>
+ Gets the form to be animated.
+ </summary>
+ <value>
+ The form to be animated.
+ </value>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimateWindow(System.IntPtr,System.Int32,System.Int32)">
+ <summary>
+ Windows API function to animate a window.
+ </summary>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.#ctor(System.Windows.Forms.Form)">
+ <summary>
+ Creates a new <b></b>FormAnimator object for the specified form.
+ </summary>
+ <param name="form">
+ The form to be animated.
+ </param>
+ <remarks>
+ No animation will be used unless the <b>Method</b> and/or <b>Direction</b> properties are set independently. The <b>Duration</b> is set to quarter of a second by default.
+ </remarks>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.#ctor(System.Windows.Forms.Form,FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationMethod,System.Int32)">
+ <summary>
+ Creates a new <b>FormAnimator</b> object for the specified form using the specified method over the specified duration.
+ </summary>
+ <param name="form">
+ The form to be animated.
+ </param>
+ <param name="method">
+ The animation method used to show and hide the form.
+ </param>
+ <param name="duration">
+ The number of milliseconds over which the animation is played.
+ </param>
+ <remarks>
+ No animation will be used for the <b>Roll</b> or <b>Slide</b> methods unless the <b>Direction</b> property is set independently.
+ </remarks>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.#ctor(System.Windows.Forms.Form,FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationMethod,FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.AnimationDirection,System.Int32)">
+ <summary>
+ Creates a new <b>FormAnimator</b> object for the specified form using the specified method in the specified direction over the specified duration.
+ </summary>
+ <param name="form">
+ The form to be animated.
+ </param>
+ <param name="method">
+ The animation method used to show and hide the form.
+ </param>
+ <param name="direction">
+ The direction in which to animate the form.
+ </param>
+ <param name="duration">
+ The number of milliseconds over which the animation is played.
+ </param>
+ <remarks>
+ The <i>direction</i> argument will have no effect if the <b>Centre</b> or <b>Blend</b> method is
+ specified.
+ </remarks>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.Form_Load(System.Object,System.EventArgs)">
+ <summary>
+ Animates the form automatically when it is loaded.
+ </summary>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.Form_VisibleChanged(System.Object,System.EventArgs)">
+ <summary>
+ Animates the form automatically when it is shown or hidden.
+ </summary>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyFormAnimator.Form_Closing(System.Object,System.ComponentModel.CancelEventArgs)">
+ <summary>
+ Animates the form automatically when it closes.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyNotificationForm.openForms">
+ <summary>
+ The list of currently open ToastForms.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyNotificationForm.allowFocus">
+ <summary>
+ Indicates whether the form can receive focus or not.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyNotificationForm.animator">
+ <summary>
+ The object that creates the sliding animation.
+ </summary>
+</member>
+<member name="F:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyNotificationForm.currentForegroundWindow">
+ <summary>
+ The handle of the window that currently has focus.
+ </summary>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyNotificationForm.GetForegroundWindow">
+ <summary>
+ Gets the handle of the window that currently has focus.
+ </summary>
+ <returns>
+ The handle of the window that currently has focus.
+ </returns>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyNotificationForm.SetForegroundWindow(System.IntPtr)">
+ <summary>
+ Activates the specified window.
+ </summary>
+ <param name="hWnd">
+ The handle of the window to be focused.
+ </param>
+ <returns>
+ True if the window was focused; False otherwise.
+ </returns>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyNotificationForm.#ctor">
+ <summary>
+ Creates a new ToastForm object that is displayed for the specified length of time.
+ </summary>      
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.FormUI.Notification.FreelyNotificationForm.Show">
+ <summary>
+ Displays the form.
+ </summary>
+ <remarks>
+ Required to allow the form to determine the current foreground window     before being displayed.
+ </remarks>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.Application.FreelyApplication.GroupBy(System.String[],System.String,System.Data.DataTable)">
+ <summary>
+ This Function Is Group The Data in The DataTable Logic like SQL Command [GROUP]
+ </summary>
+ <param name="AGroupCol">Group By Column</param>
+ <param name="AColumn">Column As</param>
+ <param name="ASourceTable">From Data Table</param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.Application.FreelyApplication.FindControl(System.Windows.Forms.Control,System.Boolean,System.Boolean,System.Boolean)">
+ <summary>
+ This is A Function To Find All The Control in The Control and List All The Name.
+ </summary>
+ <param name="AControl">Window Control Type</param>
+ <param name="bWriteControlName"> Need To Write Control Name?</param>
+ <remarks>This Function Created By Lai</remarks>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.Freely.Application.FreelyConstMessage.Author">
+ <summary>
+ This Const Message is Created By Lai Wei Loong
+ </summary>
+ <value></value>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.Freely.Cryptography.FreelyCryptography.Author">
+ <summary>
+ This Function Is Created By Lai Wei Loong
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.Freely.FreelyEvent.FreelyLookupFilteringHandler.FocusField">
+ <summary>
+  This Is Focus On With Field To Triggle This Event
+ </summary>
+ <value></value>
+ <returns></returns>
+ <remarks>GridView.FocusedColumn.FieldName = FocusField</remarks>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.Freely.FreelyEvent.FreelyLookupFilteringHandler.FilterField">
+ <summary>
+ This Filter Will Get From GridView Focus Row
+ </summary>
+ <value></value>
+ <returns></returns>
+ <remarks>Example : GridView.GetDataRow(GridView.FocusedRowHandle).Item(FilterField)</remarks>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.Freely.FreelyEvent.FreelyLookupFilteringHandler.TableFilterField">
+ <summary>
+ Effect For Master Table Which Column Are Needed For Filter
+ </summary>
+ <value></value>
+ <returns></returns>
+ <remarks>      Master.RowFilter = "[TableFileter] = RESULT OF [FilterField]"</remarks>
+</member>
+<member name="P:FreelyCreative.StockItemInquiry.Freely.FreelyEvent.FreelyLookupFilteringHandler.MasterTable">
+ <summary>
+ This Table For Execute Filtering 
+ </summary>
+ <value></value>
+ <remarks></remarks>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.FreelyEvent.FreelyLookupFilteringHandler.ShownEditor(System.Object,System.EventArgs)">
+ <summary>
+ Master Table Will as A Dataview , Filter Row Like Master Table's [TableFilterField] =gridview.GetDataRow [Filter Field].
+ </summary>
+ <param name="sender"></param>
+ <param name="e"></param>
+ <remarks></remarks>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.Script.AutoCount18LicenseDLL.RegisterDLL">
+ <summary>
+ this Function Is Create To Manually Generate DLL.    
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.Standard.Forms.FreelyFormHelper.GetAutoCountNextDocumentNo(System.String,System.Boolean)">
+ <summary>
+ This is Generate AUtocount Document No format function.
+ You May Select From SQL [DocNoFormat] DocType AND Name as reference.
+ </summary>       
+ <param name="ADocumentName">
+  please reffer to autocount document no Name
+ Example : IV Default
+ </param>  
+ <param name="NeedIncNo">
+ Mean Will Inc autocount Next document No.
+ </param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:FreelyCreative.StockItemInquiry.Freely.Standard.Forms.LookUpBuilder.FreelyLookupBuilder.BuildLookupBuilder(FreelyCreative.StockItemInquiry.Freely.Standard.Forms.LookUpBuilder.FreelyInitLookUpEditBuilder[])">
+ <summary>
+ How To use
+    Dim ALookupList As Freely.Standard.Forms.LookUpBuilder.FreelyInitLookUpEditBuilder() = {
+New Freely.Standard.Forms.LookUpBuilder.FreelyInitLookUpEditBuilder With {.RepositoryItemLookUpEdit = Me.LookUpEdit1.Properties, .LookupType = Freely.Standard.Forms.LookUpBuilder.FreelyLookupBuilder.LookupType.DisplayTerm}
+                                                        }
+        AFreelyFormHelper.FreelyLookupBuilder.BuildLookupBuilder(ALookupList.ToArray)
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="T:FreelyCreative.StockItemInquiry.FreelyStandardUDFListDataSet">
+ <summary>
+ How To Use
+  Dim AFreelyDataSet As New FreelyStandardUDFListDataSet(AutoCount.Authentication.UserSession.CurrentUserSession)
+  Dim dtSampleList As DataTable = AFreelyDataSet.FreelyUDFDataset.Tables(FreelyStandardUDFListDataSet.ListName_MIJobCard)
+  Me.lpYourLookUp.Properties.DataSource = dtSampleList
+  Me.lpYourLookUp.Properties.NullText = ""
+  Me.lpYourLookUp.Properties.DisplayMember = FreelyStandardUDFListDataSet.ListName_MIJobCard
+  Me.lpYourLookUp.Properties.ValueMember = FreelyStandardUDFListDataSet.ListName_MIJobCard
+ </summary>
+ <remarks></remarks>
+</member>
+</members>
+</doc>

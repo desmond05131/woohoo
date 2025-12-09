@@ -1,0 +1,29 @@
+﻿Namespace AutocountScript.PriceHistory.Model
+    Public Class PriceHistory
+        Public Class PriceHistoryEntity
+            Public Property DocKey As Long
+            Public Property DocNo As String
+            Public Property DocType As String
+            Public Property DocDate As DateTime
+            Public Property BranchCode As String
+            Public Property AreaCode As String
+            Public Property LastModified As DateTime
+            Public Property CreatedTimeStamp As DateTime
+
+            Public Property AccNo As String
+            Public Property CompanyName As String = ""
+
+            Public Property ItemCode As String
+            Public Property Description As String = ""
+            Public Property Desc2 As String = ""
+            Public Property BatchNo As String
+            Public Property UOM As String
+            Public Property Location As String
+
+            Public Property Qty As Decimal = 0.00
+            Public Property UnitPrice As Decimal = 0.00
+            Public Property SubTotal As Decimal = 0.00
+            Public Property CurrencyCode As String = 0.00
+        End Class
+    End Class
+End Namespace

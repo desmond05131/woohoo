@@ -1,0 +1,42 @@
+﻿Imports AutoCount
+
+Public Class FreelyRegisterAutoCountScript
+#Region "Variable"
+    Dim _DBSetting As AutoCount.Data.DBSetting
+    Dim _UserSession As AutoCount.Authentication.UserSession
+    Dim _AFreelyHelper As Freely.Standard.PlugIns.FreelyPlugInsHelper
+
+#End Region
+#Region "Property"
+    Public ReadOnly Property DBSetting As AutoCount.Data.DBSetting
+        Get
+            Return _DBSetting
+        End Get
+    End Property
+
+    Public ReadOnly Property UserSession As AutoCount.Authentication.UserSession
+        Get
+            Return _UserSession
+        End Get
+    End Property
+#End Region
+#Region "Initialize"
+    Public Sub New(ByVal AFreelyHelper As Freely.Standard.PlugIns.FreelyPlugInsHelper)
+        _AFreelyHelper = AFreelyHelper
+        _UserSession = _AFreelyHelper.UserSession
+        _DBSetting = _AFreelyHelper.UserSession.DBSetting
+    End Sub
+#End Region
+
+    Public Sub Register()
+        AutoCount.Scripting.ScriptManager.GetOrCreate(Me.DBSetting).RegisterByType("ItemCommand", GetType(StockItem))
+        AutoCount.Scripting.ScriptManager.GetOrCreate(Me.DBSetting).RegisterByType("Item", GetType(StockItemEdit))
+        ' AutoCount.Scripting.ScriptManager.GetOrCreate(Me.DBSetting).RegisterByType("ItemInquiry", GetType(StockItemInquiry))
+
+        AutoCount.Scripting.ScriptManager.GetOrCreate(Me.DBSetting).RegisterByType("ReorderAdvice", GetType(ReorderAdviceReport))
+        AutoCount.Scripting.ScriptManager.GetOrCreate(Me.DBSetting).RegisterByType("PO", GetType(PurchaseOrderScript))
+        AutoCount.Scripting.ScriptManager.GetOrCreate(Me.DBSetting).RegisterByType("GR", GetType(GoodsReceivedNoteScript))
+        AutoCount.Scripting.ScriptManager.GetOrCreate(Me.DBSetting).RegisterByType("PI", GetType(PurchaseInvoiceScript))
+
+    End Sub
+End Class

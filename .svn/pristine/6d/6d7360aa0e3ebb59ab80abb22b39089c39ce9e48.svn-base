@@ -1,0 +1,21 @@
+﻿Imports System
+Imports System.Collections.Generic
+Imports System.Windows.Forms
+Module Program
+    <STAThread()>
+    Sub Main()
+        Try
+            AutoCount.MainEntry.MainStartup.Default.SubProjectStartupWithLogin("", "")
+            If AutoCount.Authentication.UserSession.CurrentUserSession IsNot Nothing Then
+                Dim eBeforeLoadEvent As New AutoCount.PlugIn.BeforeLoadArgs(AutoCount.Authentication.UserSession.CurrentUserSession, FreelyPlugIns.FreelyGuid, "", AutoCount.CompanyProfile.Create(AutoCount.Authentication.UserSession.CurrentUserSession.DBSetting))
+                Dim eAfterLoadEvent As New AutoCount.PlugIn.AfterLoginArgs(AutoCount.Authentication.UserSession.CurrentUserSession, FreelyPlugIns.FreelyGuid, "", AutoCount.CompanyProfile.Create(AutoCount.Authentication.UserSession.CurrentUserSession.DBSetting))
+                Dim APlugIn As New FreelyPlugIns()
+                APlugIn.BeforeLoad(eBeforeLoadEvent)
+                APlugIn.AfterLogin(eAfterLoadEvent)
+                System.Windows.Forms.Application.Run(New frmMain(AutoCount.Authentication.UserSession.CurrentUserSession))
+            End If
+        Catch ex As Exception
+            Freely.Standard.MessageBox.FreelyMessageBox.ShowErrorMessage(ex.Message)
+        End Try
+    End Sub
+End Module
